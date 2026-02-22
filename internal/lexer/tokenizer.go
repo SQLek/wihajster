@@ -26,6 +26,28 @@ func (l *tokenizer) next() (Token, error) {
 		// whitespace tends to be more than one character, so we collect it in one go
 		return l.readWhitespace()
 
+	case b == '"':
+		return l.readStringLiteral(false)
+
+	case b == '\'':
+		return l.readCharacterConstant(false)
+
+	case b == 'L':
+		// L can be the start of a wide string literal, but it can also be an identifier, so we need to look ahead
+		buff := []byte{b}
+		err := expectOneOfAndAppend(l.scanner, `'"`, &buff)
+		switch {
+		case err != nil:
+			return Token{}, err
+		case len(buff) != 2:
+			// intentionaly empty
+		case buff[1] == '"':
+			return l.readStringLiteral(true)
+		case buff[1] == '\'':
+			return l.readCharacterConstant(true)
+		}
+		fallthrough
+
 	case charClassNonDigit.contains(b):
 		return l.readIdentifier()
 

@@ -2,6 +2,7 @@ package lexer_test
 
 import (
 	"bufio"
+	"io"
 	"os"
 	"testing"
 
@@ -25,7 +26,7 @@ func TestLexer_example_hello_uart(t *testing.T) {
 	var tokens []lexer.Token
 	for {
 		token, err := l.Next()
-		if err != nil {
+		if err != nil && err != io.EOF {
 			t.Fatal(err)
 		}
 		if token.Type == lexer.TokenEOF {

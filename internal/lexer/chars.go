@@ -31,6 +31,12 @@ const (
 	charClassPunctuation = charClsassSinglePunctuation + charClassMultiPunctuation
 
 	charClassWhitespace charClass = " \t\r\n\f"
+
+	charClassCharacterConstantEnd charClass = `'\n\`
+
+	charClassStringLiteralEnd charClass = `"\n\`
+
+	charClassSimpleEscapeSequence charClass = `\'"?\\abfnrtv`
 )
 
 func (cc charClass) contains(b byte) bool {
@@ -75,6 +81,10 @@ func (cc charClass) collectNegatingFrom(scanner io.ByteScanner) (string, error) 
 	return string(buff), nil
 }
 
+func (cc charClass) collectOneOfFromAndAppend(scanner io.ByteScanner, buff *[]byte) error {
+	return expectOneOfAndAppend(scanner, string(cc), buff)
+}
+
 func expectOneOfAndAppend(scanner io.ByteScanner, chars string, buff *[]byte) error {
 	b, err := scanner.ReadByte()
 	if err == io.EOF {
@@ -92,4 +102,23 @@ func expectOneOfAndAppend(scanner io.ByteScanner, chars string, buff *[]byte) er
 	}
 	scanner.UnreadByte()
 	return nil
+}
+
+func expectOneOfAndBuilder(scanner io.ByteScanner, chars string, builder *strings.Builder) (bool, error) {
+	b, err := scanner.ReadByte()
+	if err == io.EOF {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for i := 0; i < len(chars); i++ {
+		// C language is byte and not utf8 oriented, byte iteration over chars is fine
+		if chars[i] == b {
+			builder.WriteByte(b)
+			return true, nil
+		}
+	}
+	scanner.UnreadByte()
+	return false, nil
 }
