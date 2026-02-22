@@ -5,7 +5,7 @@ import (
 	"io"
 )
 
-func (l *Lexer) readDecimalFloatConstant(digits string) (Token, error) {
+func (l *tokenizer) readDecimalFloatConstant(digits string) (Token, error) {
 	fractional, err := charClassDigit.collectFrom(l.scanner)
 	if err != nil {
 		return Token{}, err
@@ -32,7 +32,7 @@ func (l *Lexer) readDecimalFloatConstant(digits string) (Token, error) {
 	return token, nil
 }
 
-func (l *Lexer) tryReadDecimalNonFractionalFloatConstant(digits string) (bool, Token, error) {
+func (l *tokenizer) tryReadDecimalNonFractionalFloatConstant(digits string) (bool, Token, error) {
 	exponent, err := l.readFloatExponent(charClassDecimalExponent)
 	if err != nil {
 		return false, Token{}, err
@@ -56,7 +56,7 @@ func (l *Lexer) tryReadDecimalNonFractionalFloatConstant(digits string) (bool, T
 	return true, token, nil
 }
 
-func (l *Lexer) readHexadecimalFloatConstant(xChar byte, digits string) (Token, error) {
+func (l *tokenizer) readHexadecimalFloatConstant(xChar byte, digits string) (Token, error) {
 	fractional, err := charClassHexadecimalDigit.collectFrom(l.scanner)
 	if err != nil {
 		return Token{}, err
@@ -83,7 +83,7 @@ func (l *Lexer) readHexadecimalFloatConstant(xChar byte, digits string) (Token, 
 	return token, nil
 }
 
-func (l *Lexer) tryReadHexadecimalNonFractionalFloatConstant(xChar byte, digits string) (bool, Token, error) {
+func (l *tokenizer) tryReadHexadecimalNonFractionalFloatConstant(xChar byte, digits string) (bool, Token, error) {
 	exponent, err := l.readFloatExponent(charClassHexadecimalExponent)
 	if err != nil {
 		return false, Token{}, err
@@ -108,7 +108,7 @@ func (l *Lexer) tryReadHexadecimalNonFractionalFloatConstant(xChar byte, digits 
 }
 
 // Reads the exponent part of a floating constant, both decimal and hexadecimal have decimal exponent, but eE or pP prefix respectively
-func (l *Lexer) readFloatExponent(exponent charClass) (string, error) {
+func (l *tokenizer) readFloatExponent(exponent charClass) (string, error) {
 	var buff []byte
 
 	e, err := l.scanner.ReadByte()

@@ -21,6 +21,16 @@ const (
 	charClassDecimalExponent charClass = "eE"
 
 	charClassHexadecimalExponent charClass = "pP"
+
+	charClassNewLine charClass = "\n"
+
+	charClsassSinglePunctuation charClass = "[](){}~?;,"
+
+	charClassMultiPunctuation charClass = ".-+*/%&|^!=<>:#"
+
+	charClassPunctuation = charClsassSinglePunctuation + charClassMultiPunctuation
+
+	charClassWhitespace charClass = " \t\r\n\f"
 )
 
 func (cc charClass) contains(b byte) bool {
@@ -46,8 +56,30 @@ func (cc charClass) collectFrom(scanner io.ByteScanner) (string, error) {
 	return string(buff), nil
 }
 
+func (cc charClass) collectNegatingFrom(scanner io.ByteScanner) (string, error) {
+	var buff []byte
+	for {
+		b, err := scanner.ReadByte()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		if cc.contains(b) {
+			scanner.UnreadByte()
+			break
+		}
+		buff = append(buff, b)
+	}
+	return string(buff), nil
+}
+
 func expectOneOfAndAppend(scanner io.ByteScanner, chars string, buff *[]byte) error {
 	b, err := scanner.ReadByte()
+	if err == io.EOF {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

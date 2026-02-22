@@ -51,6 +51,9 @@ const (
 	TokenCharacterConstant
 	TokenStringLiteral
 
+	TokenPunctuation
+
+	TokenEOF
 	TokenError
 )
 

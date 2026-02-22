@@ -5,7 +5,7 @@ import (
 	"io"
 )
 
-func (l *Lexer) readDecimalConstant() (Token, error) {
+func (l *tokenizer) readDecimalConstant() (Token, error) {
 	value, err := charClassDigit.collectFrom(l.scanner)
 	if err != nil {
 		return Token{}, err
@@ -47,7 +47,7 @@ func (l *Lexer) readDecimalConstant() (Token, error) {
 	return token, nil
 }
 
-func (l *Lexer) readOctalOrHexadecimalConstant() (Token, error) {
+func (l *tokenizer) readOctalOrHexadecimalConstant() (Token, error) {
 	// 0 octal-digits or 0x hexadecimal-digits
 	b, err := l.scanner.ReadByte()
 	if err != nil {
@@ -62,7 +62,7 @@ func (l *Lexer) readOctalOrHexadecimalConstant() (Token, error) {
 	return l.readOctalConstant()
 }
 
-func (l *Lexer) readOctalConstant() (Token, error) {
+func (l *tokenizer) readOctalConstant() (Token, error) {
 	value, err := charClassOctalDigit.collectFrom(l.scanner)
 	if err != nil {
 		return Token{}, err
@@ -85,7 +85,7 @@ func (l *Lexer) readOctalConstant() (Token, error) {
 	return token, nil
 }
 
-func (l *Lexer) readHexadecimalConstant(xChar byte) (Token, error) {
+func (l *tokenizer) readHexadecimalConstant(xChar byte) (Token, error) {
 	value, err := charClassHexadecimalDigit.collectFrom(l.scanner)
 	if err != nil {
 		return Token{}, err
