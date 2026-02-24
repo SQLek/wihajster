@@ -8,7 +8,7 @@ import (
 )
 
 func TestScanner_peekOne(t *testing.T) {
-	s := newScanner(strings.NewReader("#\n"), 8)
+	s := newScanner(strings.NewReader("#\n"), 0)
 	b, err := s.peekOne()
 	if err != nil {
 		t.Fatal("unexpected error ", err)
@@ -19,7 +19,7 @@ func TestScanner_peekOne(t *testing.T) {
 }
 
 func TestScanner_readOne(t *testing.T) {
-	s := newScanner(strings.NewReader("#\n"), 8)
+	s := newScanner(strings.NewReader("#\n"), 0)
 	b, err := s.readOne()
 	if err != nil {
 		t.Fatal("unexpected error ", err)

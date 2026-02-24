@@ -5,6 +5,8 @@ import (
 	"slices"
 )
 
+const defaultScannerBufferSize = 4096
+
 type byteClass []byte
 
 func (bc byteClass) contains(b byte) bool {
@@ -54,6 +56,9 @@ type scanner struct {
 }
 
 func newScanner(r io.Reader, buffSize int) *scanner {
+	if buffSize <= 0 {
+		buffSize = defaultScannerBufferSize
+	}
 	return &scanner{
 		reader: r,
 		buff:   make([]byte, buffSize),
