@@ -141,3 +141,32 @@ func TestScanner_onEOF(t *testing.T) {
 		t.Fatalf("expected io.EOF but got %q %v", data, err)
 	}
 }
+
+type singleByteReader byte
+
+var _ io.Reader = singleByteReader('#')
+
+func (r singleByteReader) Read(dst []byte) (int, error) {
+	if len(dst) == 0 {
+		return 0, io.ErrShortBuffer
+	}
+	dst[0] = byte(r)
+	return 1, io.EOF
+}
+
+func TestScanner_handlingShortReadWithEof(t *testing.T) {
+	s := newScanner(singleByteReader('$'), 0)
+	b, err := s.readOne()
+	if err != nil {
+		t.Fatal("reader returns err with every longer read, should be moved to second call ", err)
+	}
+	if b != '$' {
+		t.Fatalf("expected '$' got '%c'", b)
+	}
+
+	// second read, we should get io.EOF
+	b, err = s.readOne()
+	if err != io.EOF {
+		t.Fatalf("expected io.EOF, got %c and %v", b, err)
+	}
+}

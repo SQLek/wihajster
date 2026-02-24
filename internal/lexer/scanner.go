@@ -53,6 +53,11 @@ type scanner struct {
 	buff []byte
 
 	pos, max int
+
+	// acording to https://pkg.go.dev/io#Reader
+	// reader can return n>0 and error in Read()
+	// we store it for subsequent calls
+	err error
 }
 
 func newScanner(r io.Reader, buffSize int) *scanner {
@@ -74,6 +79,11 @@ func (s *scanner) remaining() int {
 }
 
 func (s *scanner) fillBuffer() error {
+	if err := s.err; err != nil {
+		s.err = nil
+		return err
+	}
+
 	if r := s.remaining(); r > 0 {
 		// This edge case shoud not happen, without calling this method directly.
 		// I prefear not to implement this edge case.
@@ -83,8 +93,11 @@ func (s *scanner) fillBuffer() error {
 	}
 
 	n, err := s.reader.Read(s.buff)
-	if err != nil {
+	if err != nil && n == 0 {
 		return err
+	}
+	if err != nil {
+		s.err = err
 	}
 
 	s.pos = 0
