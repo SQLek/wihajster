@@ -1,47 +1,69 @@
 package lexer
 
 import (
+	"fmt"
 	"io"
-	"slices"
+	"strings"
 )
 
 const defaultScannerBufferSize = 4096
 
-type byteClass []byte
+type byteClass [256]bool
+
+var _ fmt.Stringer = byteClassEmpty()
+
+func (bc byteClass) String() string {
+	var builder strings.Builder
+	for i, b := range bc {
+		if b {
+			builder.WriteByte(byte(i))
+		}
+	}
+	return builder.String()
+}
 
 func (bc byteClass) contains(b byte) bool {
-	return slices.Contains(bc, b)
+	return bc[b]
 }
 
 func (bc byteClass) negate() byteClass {
-	var negated []byte
-	for i := range 256 {
-		if !slices.Contains(bc, byte(i)) {
-			negated = append(negated, byte(i))
-		}
+	var negated byteClass
+	for i := range bc {
+		negated[i] = !bc[i]
 	}
 	return negated
 }
 
 func byteClassRange(start, stop byte) byteClass {
-	var cls []byte
+	var cls byteClass
 	for b := start; b <= stop; b++ {
-		cls = append(cls, b)
+		cls[b] = true
 	}
 	return cls
 }
 
 func byteClassChars(chars ...byte) byteClass {
-	return []byte(chars)
+	var cls byteClass
+	for _, b := range chars {
+		cls[b] = true
+	}
+	return cls
 }
 
 func byteClassCombine(bClases ...byteClass) byteClass {
-	var cls []byte
-	for _, bClass := range bClases {
-		cls = append(cls, bClass...)
+	var cls byteClass
+	for i := range cls {
+		for _, bClass := range bClases {
+			if bClass.contains(byte(i)) {
+				cls[i] = true
+			}
+		}
 	}
-	slices.Sort(cls)
-	return slices.Compact(cls)
+	return cls
+}
+
+func byteClassEmpty() byteClass {
+	return *new(byteClass)
 }
 
 // standard library buffered readers and scanners

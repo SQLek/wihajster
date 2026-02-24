@@ -31,7 +31,7 @@ func TestScanner_readOne(t *testing.T) {
 
 func TestScanner_basicParsing(t *testing.T) {
 	bcNotSlash := byteClassChars('/').negate()
-	if l := len(bcNotSlash); l != 255 {
+	if l := len(bcNotSlash.String()); l != 255 {
 		t.Fatalf("expecting everything except slash to be 255 in size, not %d", l)
 	}
 	if bcNotSlash.contains('/') {
@@ -69,8 +69,8 @@ func TestScanner_fillingNotEmptyBuffer(t *testing.T) {
 		byteClassRange('A', 'F'),
 		byteClassRange('a', 'f'),
 	)
-	if l := len(hexedecimalByteClass); l != 22 {
-		t.Fatalf("expected all hexedecimal, got %q", string(hexedecimalByteClass))
+	if s := hexedecimalByteClass.String(); len(s) != 22 {
+		t.Fatalf("expected all hexedecimal, got %q", s)
 	}
 
 	r := strings.NewReader("09afAF-")
@@ -137,7 +137,7 @@ func TestScanner_onEOF(t *testing.T) {
 		t.Fatalf("expected io.EOF but got '%c' %v", b, err)
 	}
 
-	if data, _, err := s.readBytesInClass(nil); err != io.EOF {
+	if data, _, err := s.readBytesInClass(byteClassEmpty()); err != io.EOF {
 		t.Fatalf("expected io.EOF but got %q %v", data, err)
 	}
 }
