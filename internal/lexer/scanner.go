@@ -1,6 +1,7 @@
 package lexer
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"strings"
@@ -80,6 +81,9 @@ type scanner struct {
 	// reader can return n>0 and error in Read()
 	// we store it for subsequent calls
 	err error
+
+	// counting lines and columns further down is such a pain
+	line, column int
 }
 
 func newScanner(r io.Reader, buffSize int) *scanner {
@@ -128,11 +132,29 @@ func (s *scanner) fillBuffer() error {
 	return nil
 }
 
+func (s *scanner) popOneFromBuffer() byte {
+	// only operation on buffer so no error can ocur
+	// sometimes peeked byte can be discarded
+	// without readOne() and err check
+	if s.remaining() == 0 {
+		panic("discard byte on empty buffer")
+	}
+	b := s.buff[s.pos]
+
+	if b == '\n' {
+		s.line++
+		s.column = 1
+	} else {
+		s.column++
+	}
+
+	s.pos++
+	return b
+}
+
 func (s *scanner) readOne() (byte, error) {
 	if s.remaining() > 0 {
-		b := s.buff[s.pos]
-		s.pos++
-		return b, nil
+		return s.popOneFromBuffer(), nil
 	}
 
 	err := s.fillBuffer()
@@ -186,5 +208,16 @@ func (s *scanner) readBytesInClass(cls byteClass) (data []byte, isPrefix bool, e
 	s.pos = end
 	isPrefix = end == s.max
 
+	s.advanceLineColumn(data)
 	return
+}
+
+func (s *scanner) advanceLineColumn(data []byte) {
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		s.line++
+		s.column = 1
+		s.advanceLineColumn(data[i+1:])
+	} else {
+		s.column += len(data)
+	}
 }
