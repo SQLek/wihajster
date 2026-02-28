@@ -20,10 +20,12 @@ func lex(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 		return lexDecimalInteger(s, buildFn)
 
 	case b == '\'':
-		return lexStringConstant(s, charConstantBody, buildFn)
+		s.popOneFromBuffer()
+		return lexCharacterConstant(s, buildFn)
 
 	case b == '"':
-		return lexStringConstant(s, stringLiteralBody, buildFn)
+		s.popOneFromBuffer()
+		return lexStringLiteral(s, buildFn)
 
 	case b == '.':
 		return lexDots(s, buildFn)
