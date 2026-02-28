@@ -13,6 +13,18 @@ func lex(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 	case alphaByteClass.contains(b):
 		return lexIdentifier(s, buildFn)
 
+	case b == '0':
+		return lexOctalOrHexadecimalConstant(s, buildFn)
+
+	case digitByteClass.contains(b):
+		return lexDecimalInteger(s, buildFn)
+
+	case b == '\'':
+		return lexStringConstant(s, charConstantBody, buildFn)
+
+	case b == '"':
+		return lexStringConstant(s, stringLiteralBody, buildFn)
+
 	case b == '.':
 		return lexDots(s, buildFn)
 
