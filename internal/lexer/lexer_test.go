@@ -31,7 +31,7 @@ func TestLexer_examples_hello_uart(t *testing.T) {
 		tokens = append(tokens, tok)
 	}
 
-	if l := len(tokens); l != 13 {
+	if l := len(tokens); l != 95 {
 		t.Fatalf("lexer produced invalid amount of tokens")
 	}
 }

@@ -1,5 +1,10 @@
 package lexer
 
+import (
+	"bytes"
+	"fmt"
+)
+
 type preprocesor struct {
 	// in future milestone, this will be stack of scanners
 	s *scanner
@@ -12,11 +17,25 @@ type preprocesor struct {
 
 	// accumulator for forming tokens
 	accumulator []byte
+
+	macros map[string][]Token
+
+	// macro directive only fire at start of text line ignoring whitespaces
+	// to not bother with many unnesesary tokens we store on what line ended last seen token
+	// we also store line on which preprocesor directive ocured
+	lastSeenLine, ppLine int
+
+	// we capturing token start from scanner
+	line, column int
 }
 
 func newPreprocesor(s *scanner) *preprocesor {
 	return &preprocesor{
-		s: s,
+		s:            s,
+		line:         s.line,
+		column:       s.column,
+		lastSeenLine: s.line - 1,
+		macros:       make(map[string][]Token),
 	}
 }
 
@@ -25,43 +44,61 @@ func (p *preprocesor) next() (Token, error) {
 		return tok, nil
 	}
 
-	var line, column = p.s.line, p.s.column
-
-	tokType, err := lex(p.s, p.tokenBuildFn)
+	tokType, err := p.lex()
 	if err != nil {
 		return Token{}, err
 	}
-	switch tokType {
-	case tokenPreprocStart:
-		return p.handleDirective()
 
+	switch tokType {
+	case tokenWhitespace:
+		return p.next()
 	case TokenIdentifier:
 		return p.handleKeywordOrSubsitution()
-
-		// TODO handle dots and %:%:
-
-	default:
-		// spearate into helper method
-		tok := Token{
-			Type:   tokType,
-			Line:   line,
-			Column: column,
-			Raw:    p.accumulator,
+	case tokenDots:
+		return p.handleDots()
+	case tokenPreprocStart:
+		if p.lastSeenLine >= p.line {
+			return p.errorf("preprocesor directive not on line start")
 		}
-		// emptying accumulator without releasing backing array
-		p.accumulator = p.accumulator[:0]
-		return tok, nil
+		return p.handleDirective()
 	}
+
+	return p.makeToken(tokType), nil
 }
 
-func (p *preprocesor) handleDirective() (Token, error) {
-
-	return p.next()
+func (p *preprocesor) errorf(format string, args ...any) (Token, error) {
+	format = "%d:%d " + format
+	args = append([]any{
+		p.line, p.column,
+	}, args...)
+	return Token{}, fmt.Errorf(format, args...)
 }
 
-func (p *preprocesor) handleKeywordOrSubsitution() (Token, error) {
+func (p *preprocesor) lex() (TokenType, error) {
+	p.line = p.s.line
+	p.column = p.s.column
 
-	return Token{}, nil
+	p.clearAccumulator()
+	return lex(p.s, p.tokenBuildFn)
+}
+
+func (p *preprocesor) makeToken(tokType TokenType) Token {
+	tok := Token{
+		Type:   tokType,
+		Line:   p.line,
+		Column: p.column,
+		Raw:    bytes.Clone(p.accumulator),
+	}
+	p.lastSeenLine = p.s.line
+	return tok
+}
+
+func (p *preprocesor) clearAccumulator() {
+	p.accumulator = p.accumulator[:0]
+}
+
+func (p *preprocesor) accumulatorString() string {
+	return string(p.accumulator)
 }
 
 func (p *preprocesor) tokenBuildFn(data []byte) {

@@ -95,8 +95,10 @@ func newScanner(r io.Reader, buffSize int) *scanner {
 		buff:   make([]byte, buffSize),
 		// starting with buffSize initial position
 		// to force read in first peek/read instead of constructor
-		pos: buffSize,
-		max: buffSize,
+		pos:    buffSize,
+		max:    buffSize,
+		line:   1,
+		column: 1,
 	}
 }
 

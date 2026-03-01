@@ -54,6 +54,8 @@ func lexOctalOrHexadecimalConstant(s *scanner, buildFn tokenBuildFn) (TokenType,
 		return tokenNil, err
 	}
 	if b == 'x' || b == 'X' {
+		buff1Char[0] = s.popOneFromBuffer()
+		buildFn(buff1Char)
 		return lexHexadecimalConstant(s, buildFn)
 	}
 
@@ -91,7 +93,7 @@ func lexHexadecimalConstant(s *scanner, buildFn tokenBuildFn) (TokenType, error)
 	}
 
 	b, err := s.peekOne()
-	if err != nil {
+	if err != nil && err != io.EOF {
 		return tokenNil, err
 	}
 	if b == '.' || b == 'p' || b == 'P' {

@@ -70,6 +70,10 @@ const (
 	// we push this edge case to preprocesor that can emit multiple tokens
 	tokenDots
 
+	// another token not stricte nessesary but helps in preprocesing
+	// preprocesor catches line/column on start of parsing
+	tokenWhitespace
+
 	TokenEOF
 	TokenError
 )

@@ -41,6 +41,12 @@ func TestLex(t *testing.T) {
 			expectRaw:  "0777",
 		},
 		{
+			name:       "hexedecimal integer",
+			input:      "0xDEADBEEF",
+			expectType: TokenIntegerConstant,
+			expectRaw:  "0xDEADBEEF",
+		},
+		{
 			name:       "decimal integer with U suffix",
 			input:      "42U",
 			expectType: TokenIntegerConstant,

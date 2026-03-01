@@ -10,7 +10,7 @@ func lexWhiteSpace(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 		return tokenNil, err
 	}
 
-	return lex(s, buildFn)
+	return tokenWhitespace, nil
 }
 
 // single line comment can at \n with exception of line continuation '\' '\n'
