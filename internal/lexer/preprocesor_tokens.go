@@ -16,9 +16,78 @@ func (p *preprocesor) handleKeywordOrSubsitution() (Token, error) {
 	switch tokenStr {
 	case "auto":
 		tokenType = TokenAuto
-
-		// rest of keywords
-
+	case "break":
+		tokenType = TokenBreak
+	case "case":
+		tokenType = TokenCase
+	case "char":
+		tokenType = TokenChar
+	case "const":
+		tokenType = TokenConst
+	case "continue":
+		tokenType = TokenContinue
+	case "default":
+		tokenType = TokenDefault
+	case "do":
+		tokenType = TokenDo
+	case "double":
+		tokenType = TokenDouble
+	case "else":
+		tokenType = TokenElse
+	case "enum":
+		tokenType = TokenEnum
+	case "extern":
+		tokenType = TokenExtern
+	case "float":
+		tokenType = TokenFloat
+	case "for":
+		tokenType = TokenFor
+	case "goto":
+		tokenType = TokenGoto
+	case "if":
+		tokenType = TokenIf
+	case "inline":
+		tokenType = TokenInline
+	case "int":
+		tokenType = TokenInt
+	case "long":
+		tokenType = TokenLong
+	case "register":
+		tokenType = TokenRegister
+	case "restrict":
+		tokenType = TokenRestrict
+	case "return":
+		tokenType = TokenReturn
+	case "short":
+		tokenType = TokenShort
+	case "signed":
+		tokenType = TokenSigned
+	case "sizeof":
+		tokenType = TokenSizeof
+	case "static":
+		tokenType = TokenStatic
+	case "struct":
+		tokenType = TokenStruct
+	case "switch":
+		tokenType = TokenSwitch
+	case "typedef":
+		tokenType = TokenTypedef
+	case "union":
+		tokenType = TokenUnion
+	case "unsigned":
+		tokenType = TokenUnsigned
+	case "void":
+		tokenType = TokenVoid
+	case "volatile":
+		tokenType = TokenVolatile
+	case "while":
+		tokenType = TokenWhile
+	case "_Bool":
+		tokenType = Token_Bool
+	case "_Complex":
+		tokenType = Token_Complex
+	case "_Imaginary":
+		tokenType = Token_Imaginary
 	}
 
 	return p.makeToken(tokenType), nil

@@ -85,4 +85,8 @@ type Token struct {
 	Line, Column int
 }
 
+func (t Token) IsValid() bool {
+	return t.Type != tokenNil
+}
+
 type tokenBuildFn func([]byte)
