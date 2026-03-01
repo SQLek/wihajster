@@ -10,6 +10,8 @@ type Function struct {
 	ReturnType string
 
 	Instructions []Instruction
+
+	nextTempID int
 }
 
 type Parameter struct {
