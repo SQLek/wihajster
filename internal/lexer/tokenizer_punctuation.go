@@ -14,56 +14,57 @@ import (
 var (
 	// many two char punctuations are just single char and equal
 	punctuationCharEqualLexTable = [256]TokenType{
-		'-': tokenPunctuationTBD,
-		'+': tokenPunctuationTBD,
-		'&': tokenPunctuationTBD,
-		'*': tokenPunctuationTBD,
-		'!': tokenPunctuationTBD,
-		'/': tokenPunctuationTBD,
-		'%': tokenPunctuationTBD,
-		'<': tokenPunctuationTBD,
-		'>': tokenPunctuationTBD,
-		'^': tokenPunctuationTBD,
-		'|': tokenPunctuationTBD,
-		'=': tokenPunctuationTBD,
+		'-': TokenMinusAssign,
+		'+': TokenPlusAssign,
+		'&': TokenAmpAssign,
+		'*': TokenStarAssign,
+		'!': TokenNe,
+		'/': TokenSlashAssign,
+		'%': TokenPercentAssign,
+		'<': TokenLe,
+		'>': TokenGe,
+		'^': TokenCaretAssign,
+		'|': TokenPipeAssign,
+		'=': TokenEq,
 	}
 	punctuation2CharLexTable = [256][256]TokenType{
 		'#': {'#': tokenPreProcGlue},
-		'-': {'>': tokenPunctuationTBD, '-': tokenPunctuationTBD},
-		'+': {'+': tokenPunctuationTBD},
-		'&': {'&': tokenPunctuationTBD},
+		'-': {'>': TokenArrow, '-': TokenMinusMinus},
+		'+': {'+': TokenPlusPlus},
+		'&': {'&': TokenAndAnd},
 		'/': {'/': tokenCommentSingle, '*': tokenCommentMulti},
-		'%': {'>': tokenPunctuationTBD, ':': tokenPunctuationTBD},
-		'<': {'<': tokenShiftLeft, ':': tokenPunctuationTBD, '%': tokenPunctuationTBD},
-		'>': {'>': tokenShiftRight},
-		':': {'>': tokenPunctuationTBD},
-		'|': {'|': tokenPunctuationTBD},
+		'%': {'>': TokenRBrace, ':': tokenPreprocStart},
+		'<': {'<': TokenShiftLeft, ':': TokenLBracket, '%': TokenLBrace},
+		'>': {'>': TokenShiftRight},
+		':': {'>': TokenRBracket},
+		'|': {'|': TokenOrOr},
 	}
 	punctuation1CharLexTable = [256]TokenType{
 		'#': tokenPreprocStart,
-		'-': tokenPunctuationTBD,
-		'+': tokenPunctuationTBD,
-		'&': tokenPunctuationTBD,
-		'*': tokenPunctuationTBD,
-		'!': tokenPunctuationTBD,
-		'/': tokenPunctuationTBD,
-		'%': tokenPunctuationTBD,
-		'<': tokenPunctuationTBD,
-		'>': tokenPunctuationTBD,
-		'^': tokenPunctuationTBD,
-		':': tokenPunctuationTBD,
-		'|': tokenPunctuationTBD,
-		'=': tokenPunctuationTBD,
-		'[': tokenPunctuationTBD,
-		']': tokenPunctuationTBD,
-		'(': tokenPunctuationTBD,
-		')': tokenPunctuationTBD,
-		'{': tokenPunctuationTBD,
-		'}': tokenPunctuationTBD,
-		'~': tokenPunctuationTBD,
-		'?': tokenPunctuationTBD,
-		';': tokenPunctuationTBD,
-		',': tokenPunctuationTBD,
+		'-': TokenMinus,
+		'+': TokenPlus,
+		'&': TokenAmp,
+		'*': TokenStar,
+		'!': TokenBang,
+		'/': TokenSlash,
+		'%': TokenPercent,
+		'<': TokenLt,
+		'>': TokenGt,
+		'^': TokenCaret,
+		':': TokenColon,
+		'|': TokenPipe,
+		'=': TokenAssign,
+		'[': TokenLBracket,
+		']': TokenRBracket,
+		'(': TokenLParen,
+		')': TokenRParen,
+		'{': TokenLBrace,
+		'}': TokenRBrace,
+		'~': TokenTilde,
+		'?': TokenQuestion,
+		';': TokenSemicolon,
+		',': TokenComma,
+		'.': TokenDot,
 	}
 	// reusable 1 and 2 character buffers
 	buff1Char = []byte{' '}
@@ -109,7 +110,7 @@ func lexPunctuation(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 		s.popOneFromBuffer()
 		return lexCommentMultiLine(s, buildFn)
 
-	case tokenShiftLeft, tokenShiftRight:
+	case TokenShiftLeft, TokenShiftRight:
 		sendTwo()
 		third, err := s.peekOne()
 		if err != nil && err != io.EOF {
@@ -121,10 +122,10 @@ func lexPunctuation(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 
 		buff1Char[0] = s.popOneFromBuffer()
 		buildFn(buff1Char)
-		if tt == tokenShiftLeft {
-			return tokenPunctuationTBD, nil
+		if tt == TokenShiftLeft {
+			return TokenShiftLeftAssign, nil
 		} else {
-			return tokenPunctuationTBD, nil
+			return TokenShiftRightAssign, nil
 		}
 	}
 

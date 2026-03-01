@@ -8,11 +8,12 @@ import (
 
 func TestPreprocesor_HandleDots_ValidForms(t *testing.T) {
 	tests := []struct {
-		name  string
-		input string
+		name       string
+		input      string
+		expectType TokenType
 	}{
-		{name: "single dot", input: "."},
-		{name: "ellipsis", input: "..."},
+		{name: "single dot", input: ".", expectType: TokenDot},
+		{name: "ellipsis", input: "...", expectType: TokenEllipsis},
 	}
 
 	for _, tt := range tests {
@@ -23,8 +24,8 @@ func TestPreprocesor_HandleDots_ValidForms(t *testing.T) {
 			if err != nil {
 				t.Fatalf("expected no error, got %v", err)
 			}
-			if tok.Type != tokenPunctuationTBD {
-				t.Fatalf("expected %v, got %v", tokenPunctuationTBD, tok.Type)
+			if tok.Type != tt.expectType {
+				t.Fatalf("expected %v, got %v", tt.expectType, tok.Type)
 			}
 			if got := string(tok.Raw); got != tt.input {
 				t.Fatalf("expected raw token %q, got %q", tt.input, got)

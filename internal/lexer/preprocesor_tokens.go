@@ -6,9 +6,9 @@ func (p *preprocesor) handleDots() (Token, error) {
 	tokenStr := p.accumulatorString()
 	switch tokenStr {
 	case ".":
-		return p.makeToken(tokenPunctuationTBD), nil
+		return p.makeToken(TokenDot), nil
 	case "...":
-		return p.makeToken(tokenPunctuationTBD), nil
+		return p.makeToken(TokenEllipsis), nil
 	default:
 		return p.errorf("wanted '.' or '...', got %q", tokenStr)
 	}
