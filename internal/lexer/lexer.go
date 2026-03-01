@@ -35,7 +35,7 @@ func (l *Lexer) Peek() (Token, error) {
 
 	tok, err := l.p.next()
 	if err != nil {
-		return Token{}, nil
+		return Token{}, err
 	}
 
 	l.nextTok = tok

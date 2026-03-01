@@ -1,6 +1,9 @@
 package lexer
 
-import "io"
+import (
+	"fmt"
+	"io"
+)
 
 var (
 	digitByteClass      = byteClassRange('0', '9')
@@ -56,7 +59,7 @@ func lexOctalOrHexadecimalConstant(s *scanner, buildFn tokenBuildFn) (TokenType,
 	if b == 'x' || b == 'X' {
 		buff1Char[0] = s.popOneFromBuffer()
 		buildFn(buff1Char)
-		return lexHexadecimalConstant(s, buildFn)
+		return lexHexadecimalConstant(s, true, buildFn)
 	}
 
 	return lexOctalConstant(s, buildFn)
@@ -82,14 +85,17 @@ func lexOctalConstant(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 	return TokenIntegerConstant, nil
 }
 
-func lexHexadecimalConstant(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
+func lexHexadecimalConstant(s *scanner, firstCall bool, buildFn tokenBuildFn) (TokenType, error) {
 	data, isPartial, err := s.readBytesInClass(hexalDigitByteClass)
 	if err != nil && err != io.EOF {
 		return tokenNil, err
 	}
+	if firstCall && len(data) == 0 {
+		return tokenNil, fmt.Errorf("got 0x without value at %d:%d", s.line, s.column)
+	}
 	buildFn(data)
 	if isPartial {
-		return lexHexadecimalConstant(s, buildFn)
+		return lexHexadecimalConstant(s, false, buildFn)
 	}
 
 	b, err := s.peekOne()

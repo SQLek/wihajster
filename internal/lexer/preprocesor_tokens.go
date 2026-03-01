@@ -1,8 +1,17 @@
 package lexer
 
 func (p *preprocesor) handleDots() (Token, error) {
-
-	return Token{}, nil
+	// Very likely multiple dot tokens are invalid anyway
+	// if not, better implementation will come at later milestone
+	tokenStr := p.accumulatorString()
+	switch tokenStr {
+	case ".":
+		return p.makeToken(tokenPunctuationTBD), nil
+	case "...":
+		return p.makeToken(tokenPunctuationTBD), nil
+	default:
+		return p.errorf("wanted '.' or '...', got %q", tokenStr)
+	}
 }
 
 func (p *preprocesor) handleKeywordOrSubsitution() (Token, error) {
