@@ -14,7 +14,7 @@ var (
 
 func lexDecimalInteger(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 	data, isPartial, err := s.readBytesInClass(digitByteClass)
-	if err != nil {
+	if err != nil && err != io.EOF {
 		return tokenNil, err
 	}
 	buildFn(data)
@@ -23,7 +23,7 @@ func lexDecimalInteger(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 	}
 
 	b, err := s.peekOne()
-	if err != nil {
+	if err != nil && err != io.EOF {
 		return tokenNil, err
 	}
 	if b == '.' || b == 'e' || b == 'E' {
@@ -41,9 +41,15 @@ func lexDecimalInteger(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 func lexOctalOrHexadecimalConstant(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 	// 0 already peeked
 	s.popOneFromBuffer()
+	buff1Char[0] = '0'
+	buildFn(buff1Char)
 
 	// 0 is just 0, x denotes hexedecimal, any other octal means octal
 	b, err := s.peekOne()
+	if err == io.EOF {
+		// 0 is till a valid octal
+		return TokenIntegerConstant, nil
+	}
 	if err != nil {
 		return tokenNil, err
 	}
@@ -56,7 +62,7 @@ func lexOctalOrHexadecimalConstant(s *scanner, buildFn tokenBuildFn) (TokenType,
 
 func lexOctalConstant(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 	data, isPartial, err := s.readBytesInClass(octalDigitByteClass)
-	if err != nil {
+	if err != nil && err != io.EOF {
 		return tokenNil, err
 	}
 	buildFn(data)
@@ -76,12 +82,12 @@ func lexOctalConstant(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 
 func lexHexadecimalConstant(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 	data, isPartial, err := s.readBytesInClass(hexalDigitByteClass)
-	if err != nil {
+	if err != nil && err != io.EOF {
 		return tokenNil, err
 	}
 	buildFn(data)
 	if isPartial {
-		return lexDecimalInteger(s, buildFn)
+		return lexHexadecimalConstant(s, buildFn)
 	}
 
 	b, err := s.peekOne()

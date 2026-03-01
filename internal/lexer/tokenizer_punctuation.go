@@ -1,6 +1,9 @@
 package lexer
 
-import "fmt"
+import (
+	"fmt"
+	"io"
+)
 
 // Dots and elypsis. We have 1 character look ahead. We cannot distinguish,
 // and we cannot emit two tokens at once. Must handle in preprocesor.
@@ -70,7 +73,7 @@ var (
 func lexPunctuation(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 	first := s.popOneFromBuffer()
 	second, err := s.peekOne()
-	if err != nil {
+	if err != nil && err != io.EOF {
 		return tokenNil, err
 	}
 
@@ -109,7 +112,7 @@ func lexPunctuation(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 	case tokenShiftLeft, tokenShiftRight:
 		sendTwo()
 		third, err := s.peekOne()
-		if err != nil {
+		if err != nil && err != io.EOF {
 			return tokenNil, err
 		}
 		if third != '=' {
@@ -117,6 +120,7 @@ func lexPunctuation(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 		}
 
 		buff1Char[0] = s.popOneFromBuffer()
+		buildFn(buff1Char)
 		if tt == tokenShiftLeft {
 			return tokenPunctuationTBD, nil
 		} else {
@@ -126,6 +130,8 @@ func lexPunctuation(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 
 	// and anything thats left is a single char punctuation
 	if tt := punctuation1CharLexTable[first]; tt != tokenNil {
+		buff1Char[0] = first
+		buildFn(buff1Char)
 		return tt, nil
 	}
 
@@ -139,7 +145,7 @@ var dotsByteClass = byteClassChars('.')
 
 func lexDots(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 	data, isPartial, err := s.readBytesInClass(dotsByteClass)
-	if err != nil {
+	if err != nil && err != io.EOF {
 		return tokenNil, err
 	}
 	buildFn(data)
