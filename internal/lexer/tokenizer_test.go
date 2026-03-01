@@ -79,13 +79,13 @@ func TestLex(t *testing.T) {
 		{
 			name:       "two-char punctuation equality",
 			input:      "==",
-			expectType: tokenPunctuationTBD,
+			expectType: TokenEq,
 			expectRaw:  "==",
 		},
 		{
 			name:       "single-char punctuation paren",
 			input:      "(",
-			expectType: tokenPunctuationTBD,
+			expectType: TokenLParen,
 			expectRaw:  "(",
 		},
 		{
@@ -103,25 +103,25 @@ func TestLex(t *testing.T) {
 		{
 			name:       "shift-left assign <<=",
 			input:      "<<=",
-			expectType: tokenPunctuationTBD,
+			expectType: TokenShiftLeftAssign,
 			expectRaw:  "<<=",
 		},
 		{
 			name:       "shift-right >>",
 			input:      ">>",
-			expectType: tokenShiftRight,
+			expectType: TokenShiftRight,
 			expectRaw:  ">>",
 		},
 		{
 			name:       "logical and &&",
 			input:      "&&",
-			expectType: tokenPunctuationTBD,
+			expectType: TokenAndAnd,
 			expectRaw:  "&&",
 		},
 		{
 			name:       "logical or ||",
 			input:      "||",
-			expectType: tokenPunctuationTBD,
+			expectType: TokenOrOr,
 			expectRaw:  "||",
 		},
 		{

@@ -51,19 +51,60 @@ const (
 	TokenCharacterConstant
 	TokenStringLiteral
 
+	// Punctuation
+	TokenLBracket
+	TokenRBracket
+	TokenLParen
+	TokenRParen
+	TokenLBrace
+	TokenRBrace
+	TokenDot
+	TokenEllipsis
+	TokenArrow
+	TokenPlusPlus
+	TokenMinusMinus
+	TokenAmp
+	TokenStar
+	TokenPlus
+	TokenMinus
+	TokenTilde
+	TokenBang
+	TokenSlash
+	TokenPercent
+	TokenShiftLeft
+	TokenShiftRight
+	TokenLt
+	TokenGt
+	TokenLe
+	TokenGe
+	TokenEq
+	TokenNe
+	TokenCaret
+	TokenPipe
+	TokenAndAnd
+	TokenOrOr
+	TokenQuestion
+	TokenColon
+	TokenSemicolon
+	TokenAssign
+	TokenStarAssign
+	TokenSlashAssign
+	TokenPercentAssign
+	TokenPlusAssign
+	TokenMinusAssign
+	TokenShiftLeftAssign
+	TokenShiftRightAssign
+	TokenAmpAssign
+	TokenCaretAssign
+	TokenPipeAssign
+	TokenComma
+
 	tokenPreprocStart
 	tokenPreProcGlue
-
-	// untill parser is designed, we don't know what punctuations to separate
-	tokenPunctuationTBD
 
 	// token used privately so punctuation parsing table could be used for comments
 	tokenCommentSingle
 	tokenCommentMulti
-
-	// thease tokens are used as special case to parse 3 char punctuations
-	tokenShiftLeft
-	tokenShiftRight
 
 	// elipsis ... is nasty, becase in moment we know .. is not followed by third dot
 	// we cannot emit two tokens at once
