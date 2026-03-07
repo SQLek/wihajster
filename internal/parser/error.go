@@ -27,3 +27,28 @@ func newError(tok lexer.Token, format string, args ...any) *Error {
 func unsupportedError(tok lexer.Token, feature string) *Error {
 	return newError(tok, "unsupported in current subset: %s", feature)
 }
+
+type ParseErrors struct {
+	FatalLexer  error
+	Diagnostics []*Error
+}
+
+func (e *ParseErrors) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.FatalLexer != nil {
+		return fmt.Sprintf("lexer error: %v", e.FatalLexer)
+	}
+	if len(e.Diagnostics) > 0 {
+		return e.Diagnostics[0].Error()
+	}
+	return "parse failed"
+}
+
+func (e *ParseErrors) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.FatalLexer
+}

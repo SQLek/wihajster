@@ -150,16 +150,25 @@ func parseOK(t *testing.T, src string) *parser.TranslationUnit {
 
 func parseErr(t *testing.T, src string) *parser.Error {
 	t.Helper()
+	pErrs := parseErrors(t, src)
+	if len(pErrs.Diagnostics) == 0 {
+		t.Fatalf("expected parser diagnostics but got none (fatal lexer=%v)", pErrs.FatalLexer)
+	}
+	return pErrs.Diagnostics[0]
+}
+
+func parseErrors(t *testing.T, src string) *parser.ParseErrors {
+	t.Helper()
 	lex := newLexer(t, src)
 	_, err := parser.Parse(lex)
 	if err == nil {
 		t.Fatalf("expected parse error but got none")
 	}
-	pErr, ok := err.(*parser.Error)
+	pErrs, ok := err.(*parser.ParseErrors)
 	if !ok {
-		t.Fatalf("expected parser.Error, got %T (%v)", err, err)
+		t.Fatalf("expected *parser.ParseErrors, got %T (%v)", err, err)
 	}
-	return pErr
+	return pErrs
 }
 
 func newLexer(t *testing.T, src string) *lexer.Lexer {

@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
@@ -14,7 +15,11 @@ type tokenSource interface {
 
 type Parser struct {
 	tokens tokenSource
-	last   lexer.Token
+
+	fatalLexErr error
+	diagnostics []*Error
+
+	last lexer.Token
 }
 
 func New(tokens tokenSource) *Parser {
@@ -28,100 +33,104 @@ func Parse(tokens tokenSource) (*TranslationUnit, error) {
 func (p *Parser) ParseTranslationUnit() (*TranslationUnit, error) {
 	tu := &TranslationUnit{}
 	for {
-		tok, err := p.peek()
-		if err == io.EOF {
-			return tu, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-
+		tok := p.peekTok()
 		if tok.Type == lexer.TokenEOF {
-			_, _ = p.next()
-			return tu, nil
+			break
 		}
 
-		fn, err := p.parseFunctionDefinition()
-		if err != nil {
-			return nil, err
+		fn, ok := p.parseFunctionDefinition()
+		if ok {
+			tu.Functions = append(tu.Functions, fn)
+			continue
 		}
-		tu.Functions = append(tu.Functions, fn)
+
+		if p.peekTok().Type == lexer.TokenEOF {
+			break
+		}
+		p.synchronizeTopLevel()
 	}
+
+	if err := p.finishError(); err != nil {
+		return nil, err
+	}
+	return tu, nil
 }
 
-func (p *Parser) parseFunctionDefinition() (FunctionDefinition, error) {
-	typeTok, typ, err := p.parseTypeSpecifier()
-	if err != nil {
-		return FunctionDefinition{}, err
+func (p *Parser) parseFunctionDefinition() (FunctionDefinition, bool) {
+	typeTok, typ, ok := p.parseTypeSpecifier()
+	if !ok {
+		return FunctionDefinition{}, false
 	}
 
-	if tok, err := p.peek(); err == nil && tok.Type == lexer.TokenStar {
-		return FunctionDefinition{}, unsupportedError(tok, "pointers")
+	if p.peekTok().Type == lexer.TokenStar {
+		p.addDiagnostic(unsupportedError(p.peekTok(), "pointers"))
+		p.nextTok()
+		return FunctionDefinition{}, false
 	}
 
-	name, err := p.expect(lexer.TokenIdentifier, "function name")
-	if err != nil {
-		return FunctionDefinition{}, err
+	_, name, ok := p.expectIdent("function name")
+	if !ok {
+		return FunctionDefinition{}, false
 	}
 
-	if _, err := p.expect(lexer.TokenLParen, "'('"); err != nil {
-		return FunctionDefinition{}, err
-	}
-	if tok, err := p.peek(); err != nil {
-		return FunctionDefinition{}, err
-	} else if tok.Type != lexer.TokenRParen {
-		return FunctionDefinition{}, unsupportedError(tok, "function parameters")
-	}
-	if _, err := p.expect(lexer.TokenRParen, "')'"); err != nil {
-		return FunctionDefinition{}, err
+	if !p.expectToken(lexer.TokenLParen, "'('") {
+		return FunctionDefinition{}, false
 	}
 
-	body, err := p.parseBlockStatement()
-	if err != nil {
-		return FunctionDefinition{}, err
+	if tok := p.peekTok(); tok.Type != lexer.TokenRParen {
+		p.addDiagnostic(unsupportedError(tok, "function parameters"))
+		for tok.Type != lexer.TokenRParen && tok.Type != lexer.TokenEOF {
+			p.nextTok()
+			tok = p.peekTok()
+		}
+	}
+	if !p.expectToken(lexer.TokenRParen, "')'") {
+		return FunctionDefinition{}, false
+	}
+
+	body, ok := p.parseBlockStatement()
+	if !ok {
+		return FunctionDefinition{}, false
 	}
 
 	return FunctionDefinition{
 		Token:      typeTok,
 		ReturnType: typ,
-		Name:       string(name.Raw),
+		Name:       name,
 		Body:       body,
-	}, nil
+	}, true
 }
 
-func (p *Parser) parseTypeSpecifier() (lexer.Token, TypeSpecifier, error) {
-	tok, err := p.peek()
-	if err != nil {
-		return lexer.Token{}, 0, err
-	}
+func (p *Parser) parseTypeSpecifier() (lexer.Token, TypeSpecifier, bool) {
+	tok := p.peekTok()
 
 	switch tok.Type {
 	case lexer.TokenInt:
-		_, _ = p.next()
-		return tok, TypeSpecifierInt, nil
+		p.nextTok()
+		return tok, TypeSpecifierInt, true
 	case lexer.TokenVoid:
-		_, _ = p.next()
-		return tok, TypeSpecifierVoid, nil
+		p.nextTok()
+		return tok, TypeSpecifierVoid, true
 	case lexer.TokenStruct:
-		return lexer.Token{}, 0, unsupportedError(tok, "struct declarations")
+		p.addDiagnostic(unsupportedError(tok, "struct declarations"))
+		p.nextTok()
+		return lexer.Token{}, 0, false
 	default:
-		return lexer.Token{}, 0, newError(tok, "expected type specifier, got %s", tokenDescription(tok))
+		p.addDiagnostic(newError(p.errorToken(tok), "expected type specifier, got %s", tokenDescription(tok)))
+		return lexer.Token{}, 0, false
 	}
 }
 
-func (p *Parser) parseStatement() (Statement, error) {
-	tok, err := p.peek()
-	if err != nil {
-		return nil, err
-	}
+func (p *Parser) parseStatement() (Statement, bool) {
+	tok := p.peekTok()
 
 	switch tok.Type {
 	case lexer.TokenLBrace:
-		stmt, err := p.parseBlockStatement()
-		if err != nil {
-			return nil, err
+		stmt, ok := p.parseBlockStatement()
+		if !ok {
+			return nil, false
 		}
-		return stmt, nil
+		return stmt, true
 	case lexer.TokenReturn:
 		return p.parseReturnStatement()
 	case lexer.TokenIf:
@@ -129,223 +138,204 @@ func (p *Parser) parseStatement() (Statement, error) {
 	case lexer.TokenWhile:
 		return p.parseWhileStatement()
 	case lexer.TokenInt, lexer.TokenVoid:
-		return nil, unsupportedError(tok, "declarations beyond current subset")
+		p.addDiagnostic(unsupportedError(tok, "declarations beyond current subset"))
+		return nil, false
 	case lexer.TokenStruct:
-		return nil, unsupportedError(tok, "struct declarations")
+		p.addDiagnostic(unsupportedError(tok, "struct declarations"))
+		return nil, false
 	default:
 		return p.parseExpressionStatement()
 	}
 }
 
-func (p *Parser) parseBlockStatement() (BlockStatement, error) {
-	open, err := p.expect(lexer.TokenLBrace, "'{'")
-	if err != nil {
-		return BlockStatement{}, err
+func (p *Parser) parseBlockStatement() (BlockStatement, bool) {
+	open, ok := p.expect(lexer.TokenLBrace, "'{'")
+	if !ok {
+		return BlockStatement{}, false
 	}
 
 	var stmts []Statement
 	for {
-		tok, err := p.peek()
-		if err != nil {
-			if err == io.EOF {
-				return BlockStatement{}, newError(open, "expected '}' before end of file")
-			}
-			return BlockStatement{}, err
+		tok := p.peekTok()
+		switch tok.Type {
+		case lexer.TokenEOF:
+			p.addDiagnostic(newError(open, "expected '}' before end of file"))
+			return BlockStatement{}, false
+		case lexer.TokenRBrace:
+			p.nextTok()
+			return BlockStatement{Token: open, Statements: stmts}, true
 		}
-		if tok.Type == lexer.TokenRBrace {
-			_, _ = p.next()
-			break
+
+		stmt, stmtOK := p.parseStatement()
+		if stmtOK {
+			stmts = append(stmts, stmt)
+			continue
 		}
-		stmt, err := p.parseStatement()
-		if err != nil {
-			return BlockStatement{}, err
+		p.synchronizeStatement()
+	}
+}
+
+func (p *Parser) parseReturnStatement() (Statement, bool) {
+	retTok, ok := p.expect(lexer.TokenReturn, "'return'")
+	if !ok {
+		return nil, false
+	}
+
+	if p.accept(lexer.TokenSemicolon) {
+		return ReturnStatement{Token: retTok}, true
+	}
+
+	expr, ok := p.parseExpression(0)
+	if !ok {
+		return nil, false
+	}
+	if !p.expectToken(lexer.TokenSemicolon, "';'") {
+		return nil, false
+	}
+	return ReturnStatement{Token: retTok, Expression: expr}, true
+}
+
+func (p *Parser) parseIfStatement() (Statement, bool) {
+	ifTok, ok := p.expect(lexer.TokenIf, "'if'")
+	if !ok {
+		return nil, false
+	}
+	if !p.expectToken(lexer.TokenLParen, "'('") {
+		return nil, false
+	}
+	cond, ok := p.parseExpression(0)
+	if !ok {
+		return nil, false
+	}
+	if !p.expectToken(lexer.TokenRParen, "')'") {
+		return nil, false
+	}
+	thenStmt, ok := p.parseStatement()
+	if !ok {
+		return nil, false
+	}
+
+	if p.accept(lexer.TokenElse) {
+		elseStmt, ok := p.parseStatement()
+		if !ok {
+			return nil, false
 		}
-		stmts = append(stmts, stmt)
+		return IfStatement{Token: ifTok, Cond: cond, Then: thenStmt, Else: elseStmt}, true
 	}
 
-	return BlockStatement{Token: open, Statements: stmts}, nil
+	return IfStatement{Token: ifTok, Cond: cond, Then: thenStmt}, true
 }
 
-func (p *Parser) parseReturnStatement() (Statement, error) {
-	retTok, err := p.expect(lexer.TokenReturn, "'return'")
-	if err != nil {
-		return nil, err
+func (p *Parser) parseWhileStatement() (Statement, bool) {
+	whileTok, ok := p.expect(lexer.TokenWhile, "'while'")
+	if !ok {
+		return nil, false
+	}
+	if !p.expectToken(lexer.TokenLParen, "'('") {
+		return nil, false
+	}
+	cond, ok := p.parseExpression(0)
+	if !ok {
+		return nil, false
+	}
+	if !p.expectToken(lexer.TokenRParen, "')'") {
+		return nil, false
+	}
+	body, ok := p.parseStatement()
+	if !ok {
+		return nil, false
 	}
 
-	tok, err := p.peek()
-	if err != nil {
-		return nil, err
-	}
-
-	if tok.Type == lexer.TokenSemicolon {
-		_, _ = p.next()
-		return ReturnStatement{Token: retTok}, nil
-	}
-
-	expr, err := p.parseExpression(0)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := p.expect(lexer.TokenSemicolon, "';'"); err != nil {
-		return nil, err
-	}
-	return ReturnStatement{Token: retTok, Expression: expr}, nil
+	return WhileStatement{Token: whileTok, Cond: cond, Body: body}, true
 }
 
-func (p *Parser) parseIfStatement() (Statement, error) {
-	ifTok, err := p.expect(lexer.TokenIf, "'if'")
-	if err != nil {
-		return nil, err
-	}
-	if _, err := p.expect(lexer.TokenLParen, "'('"); err != nil {
-		return nil, err
-	}
-	cond, err := p.parseExpression(0)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := p.expect(lexer.TokenRParen, "')'"); err != nil {
-		return nil, err
-	}
-	thenStmt, err := p.parseStatement()
-	if err != nil {
-		return nil, err
+func (p *Parser) parseExpressionStatement() (Statement, bool) {
+	tok := p.peekTok()
+
+	if p.accept(lexer.TokenSemicolon) {
+		return ExpressionStatement{Token: tok}, true
 	}
 
-	tok, err := p.peek()
-	if err != nil && err != io.EOF {
-		return nil, err
+	expr, ok := p.parseExpression(0)
+	if !ok {
+		return nil, false
 	}
-	if err == nil && tok.Type == lexer.TokenElse {
-		_, _ = p.next()
-		elseStmt, err := p.parseStatement()
-		if err != nil {
-			return nil, err
-		}
-		return IfStatement{Token: ifTok, Cond: cond, Then: thenStmt, Else: elseStmt}, nil
+	if !p.expectToken(lexer.TokenSemicolon, "';'") {
+		return nil, false
 	}
-
-	return IfStatement{Token: ifTok, Cond: cond, Then: thenStmt}, nil
+	return ExpressionStatement{Token: tok, Expression: expr}, true
 }
 
-func (p *Parser) parseWhileStatement() (Statement, error) {
-	whileTok, err := p.expect(lexer.TokenWhile, "'while'")
-	if err != nil {
-		return nil, err
-	}
-	if _, err := p.expect(lexer.TokenLParen, "'('"); err != nil {
-		return nil, err
-	}
-	cond, err := p.parseExpression(0)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := p.expect(lexer.TokenRParen, "')'"); err != nil {
-		return nil, err
-	}
-	body, err := p.parseStatement()
-	if err != nil {
-		return nil, err
-	}
-
-	return WhileStatement{Token: whileTok, Cond: cond, Body: body}, nil
-}
-
-func (p *Parser) parseExpressionStatement() (Statement, error) {
-	tok, err := p.peek()
-	if err != nil {
-		return nil, err
-	}
-
-	if tok.Type == lexer.TokenSemicolon {
-		_, _ = p.next()
-		return ExpressionStatement{Token: tok}, nil
-	}
-
-	expr, err := p.parseExpression(0)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := p.expect(lexer.TokenSemicolon, "';'"); err != nil {
-		return nil, err
-	}
-	return ExpressionStatement{Token: tok, Expression: expr}, nil
-}
-
-func (p *Parser) parseExpression(minPrec int) (Expression, error) {
-	lhs, err := p.parseUnaryExpression()
-	if err != nil {
-		return nil, err
+func (p *Parser) parseExpression(minPrec int) (Expression, bool) {
+	lhs, ok := p.parseUnaryExpression()
+	if !ok {
+		return nil, false
 	}
 
 	for {
-		tok, err := p.peek()
-		if err != nil {
-			if err == io.EOF {
-				return lhs, nil
-			}
-			return nil, err
-		}
+		tok := p.peekTok()
 		prec := infixPrecedence(tok.Type)
 		if prec < minPrec {
-			return lhs, nil
+			return lhs, true
 		}
 
-		_, _ = p.next()
-		rhs, err := p.parseExpression(prec + 1)
-		if err != nil {
-			return nil, err
+		p.nextTok()
+		rhs, ok := p.parseExpression(prec + 1)
+		if !ok {
+			return nil, false
 		}
 		lhs = BinaryExpression{Token: tok, Op: tok.Type, LHS: lhs, RHS: rhs}
 	}
 }
 
-func (p *Parser) parseUnaryExpression() (Expression, error) {
-	tok, err := p.peek()
-	if err != nil {
-		return nil, err
-	}
+func (p *Parser) parseUnaryExpression() (Expression, bool) {
+	tok := p.peekTok()
 
 	switch tok.Type {
 	case lexer.TokenMinus, lexer.TokenBang, lexer.TokenTilde, lexer.TokenPlus:
-		_, _ = p.next()
-		op, err := p.parseUnaryExpression()
-		if err != nil {
-			return nil, err
+		p.nextTok()
+		op, ok := p.parseUnaryExpression()
+		if !ok {
+			return nil, false
 		}
-		return UnaryExpression{Token: tok, Op: tok.Type, Operand: op}, nil
+		return UnaryExpression{Token: tok, Op: tok.Type, Operand: op}, true
 	default:
 		return p.parsePrimaryExpression()
 	}
 }
 
-func (p *Parser) parsePrimaryExpression() (Expression, error) {
-	tok, err := p.peek()
-	if err != nil {
-		return nil, err
-	}
+func (p *Parser) parsePrimaryExpression() (Expression, bool) {
+	tok := p.peekTok()
 
 	switch tok.Type {
 	case lexer.TokenIdentifier:
-		_, _ = p.next()
-		return IdentifierExpression{Token: tok, Name: string(tok.Raw)}, nil
+		tok, name, ok := p.expectIdent("identifier")
+		if !ok {
+			return nil, false
+		}
+		return IdentifierExpression{Token: tok, Name: name}, true
 	case lexer.TokenIntegerConstant:
-		_, _ = p.next()
-		return IntegerLiteralExpression{Token: tok, Raw: string(tok.Raw)}, nil
+		tok, raw, ok := p.expectInteger("integer literal")
+		if !ok {
+			return nil, false
+		}
+		return IntegerLiteralExpression{Token: tok, Raw: raw}, true
 	case lexer.TokenLParen:
-		_, _ = p.next()
-		expr, err := p.parseExpression(0)
-		if err != nil {
-			return nil, err
+		p.nextTok()
+		expr, ok := p.parseExpression(0)
+		if !ok {
+			return nil, false
 		}
-		if _, err := p.expect(lexer.TokenRParen, "')'"); err != nil {
-			return nil, err
+		if !p.expectToken(lexer.TokenRParen, "')'") {
+			return nil, false
 		}
-		return expr, nil
+		return expr, true
 	case lexer.TokenStar:
-		return nil, unsupportedError(tok, "pointers")
+		p.addDiagnostic(unsupportedError(tok, "pointers"))
+		return nil, false
 	default:
-		return nil, newError(tok, "expected expression, got %s", tokenDescription(tok))
+		p.addDiagnostic(newError(p.errorToken(tok), "expected expression, got %s", tokenDescription(tok)))
+		return nil, false
 	}
 }
 
@@ -376,52 +366,141 @@ func infixPrecedence(tt lexer.TokenType) int {
 	}
 }
 
-func (p *Parser) expect(tt lexer.TokenType, what string) (lexer.Token, error) {
-	tok, err := p.next()
-	if err != nil {
-		if err == io.EOF {
-			return lexer.Token{}, newError(p.last, "unexpected end of file, expected %s", what)
-		}
-		return lexer.Token{}, err
-	}
+func (p *Parser) expectToken(tt lexer.TokenType, what string) bool {
+	_, ok := p.expect(tt, what)
+	return ok
+}
+
+func (p *Parser) expect(tt lexer.TokenType, what string) (lexer.Token, bool) {
+	tok := p.nextTok()
 	if tok.Type != tt {
-		return lexer.Token{}, newError(tok, "expected %s, got %s", what, tokenDescription(tok))
+		if tok.Type == lexer.TokenEOF {
+			p.addDiagnostic(newError(p.errorToken(tok), "unexpected end of file, expected %s", what))
+		} else {
+			p.addDiagnostic(newError(tok, "expected %s, got %s", what, tokenDescription(tok)))
+		}
+		return lexer.Token{}, false
 	}
-	return tok, nil
+	return tok, true
 }
 
-func (p *Parser) peek() (lexer.Token, error) {
+func (p *Parser) expectIdent(what string) (lexer.Token, string, bool) {
+	tok, ok := p.expect(lexer.TokenIdentifier, what)
+	if !ok {
+		return lexer.Token{}, "", false
+	}
+	return tok, string(tok.Raw), true
+}
+
+func (p *Parser) expectInteger(what string) (lexer.Token, string, bool) {
+	tok, ok := p.expect(lexer.TokenIntegerConstant, what)
+	if !ok {
+		return lexer.Token{}, "", false
+	}
+	return tok, string(tok.Raw), true
+}
+
+func (p *Parser) accept(tt lexer.TokenType) bool {
+	if p.peekTok().Type != tt {
+		return false
+	}
+	p.nextTok()
+	return true
+}
+
+func (p *Parser) peekTok() lexer.Token {
 	tok, err := p.tokens.Peek()
-	if err == io.EOF {
-		return tok, io.EOF
+	tok = p.normalizeToken(tok, err)
+	if tok.Type != lexer.TokenEOF {
+		p.last = tok
 	}
-	if err != nil {
-		return lexer.Token{}, err
-	}
-	if tok.Type == lexer.TokenError {
-		return lexer.Token{}, newError(tok, "%s", string(tok.Raw))
-	}
-	p.last = tok
-	return tok, nil
+	return tok
 }
 
-func (p *Parser) next() (lexer.Token, error) {
+func (p *Parser) nextTok() lexer.Token {
 	tok, err := p.tokens.Next()
-	if err == io.EOF {
-		return tok, io.EOF
+	tok = p.normalizeToken(tok, err)
+	if tok.Type != lexer.TokenEOF {
+		p.last = tok
 	}
+	return tok
+}
+
+func (p *Parser) normalizeToken(tok lexer.Token, err error) lexer.Token {
 	if err != nil {
-		return lexer.Token{}, err
+		if !errors.Is(err, io.EOF) && p.fatalLexErr == nil {
+			p.fatalLexErr = err
+		}
+		return lexer.Token{Type: lexer.TokenEOF}
 	}
 	if tok.Type == lexer.TokenError {
-		return lexer.Token{}, newError(tok, "%s", string(tok.Raw))
+		if p.fatalLexErr == nil {
+			p.fatalLexErr = fmt.Errorf("%s", string(tok.Raw))
+		}
+		return lexer.Token{Type: lexer.TokenEOF}
 	}
-	return tok, nil
+	if tok.Type == 0 {
+		return lexer.Token{Type: lexer.TokenEOF}
+	}
+	return tok
+}
+
+func (p *Parser) addDiagnostic(err *Error) {
+	if err != nil {
+		p.diagnostics = append(p.diagnostics, err)
+	}
+}
+
+func (p *Parser) errorToken(tok lexer.Token) lexer.Token {
+	if tok.Type == lexer.TokenEOF && p.last.IsValid() {
+		return p.last
+	}
+	return tok
+}
+
+func (p *Parser) synchronizeStatement() {
+	for {
+		tok := p.peekTok()
+		switch tok.Type {
+		case lexer.TokenEOF, lexer.TokenRBrace:
+			return
+		case lexer.TokenSemicolon:
+			p.nextTok()
+			return
+		default:
+			p.nextTok()
+		}
+	}
+}
+
+func (p *Parser) synchronizeTopLevel() {
+	for {
+		tok := p.peekTok()
+		switch tok.Type {
+		case lexer.TokenEOF, lexer.TokenInt, lexer.TokenVoid:
+			return
+		default:
+			p.nextTok()
+		}
+	}
+}
+
+func (p *Parser) finishError() error {
+	if p.fatalLexErr == nil && len(p.diagnostics) == 0 {
+		return nil
+	}
+	return &ParseErrors{
+		FatalLexer:  p.fatalLexErr,
+		Diagnostics: p.diagnostics,
+	}
 }
 
 func tokenDescription(tok lexer.Token) string {
 	if len(tok.Raw) > 0 {
 		return fmt.Sprintf("%q", string(tok.Raw))
+	}
+	if tok.Type == lexer.TokenEOF {
+		return "end of file"
 	}
 	return fmt.Sprintf("token(%d)", tok.Type)
 }
