@@ -134,21 +134,7 @@ int id(int x) {
 	}
 }
 
-func TestLower_RejectsGlobalVariableAccessInFunction(t *testing.T) {
-	src := `
-int g;
-int main() {
-	return g;
-}
-`
-
-	err := lowerErr(t, src)
-	if !strings.Contains(err.Error(), "not yet supported in M1 TAC lowering: global variable access") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestLower_AcceptsGlobalsWithoutFunctionUse(t *testing.T) {
+func TestLower_RejectsGlobalDeclarationsInM1(t *testing.T) {
 	src := `
 int g = 1;
 int main() {
@@ -156,7 +142,150 @@ int main() {
 }
 `
 
+	err := lowerErr(t, src)
+	if !strings.Contains(err.Error(), "unsupported in current subset: global declarations") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLower_LowersDirectFunctionCall(t *testing.T) {
+	src := `
+int inc(int x) {
+	return x + 1;
+}
+int main() {
+	return inc(41);
+}
+`
+
+	text := lowerText(t, src)
+	if !strings.Contains(text, "call @inc(") {
+		t.Fatalf("expected call lowering, got:\n%s", text)
+	}
+}
+
+func TestLower_RejectsCallToUndeclaredFunction(t *testing.T) {
+	src := `
+int main() {
+	return foo(1);
+}
+`
+
+	err := lowerErr(t, src)
+	if !strings.Contains(err.Error(), "call to undeclared function foo") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLower_RejectsWrongCallArity(t *testing.T) {
+	src := `
+int f(int x) {
+	return x;
+}
+int main() {
+	return f(1, 2);
+}
+`
+
+	err := lowerErr(t, src)
+	if !strings.Contains(err.Error(), "expects 1 arguments, got 2") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLower_RejectsCallArgumentTypeMismatch(t *testing.T) {
+	src := `
+int f(int *x) {
+	return 0;
+}
+int main() {
+	int v = 0;
+	return f(v);
+}
+`
+
+	err := lowerErr(t, src)
+	if !strings.Contains(err.Error(), "argument 1 to f has type i32, expected ptr") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLower_RejectsNonIdentifierCallTarget(t *testing.T) {
+	src := `
+int f(int x) {
+	return x;
+}
+int main() {
+	return (f + 0)(1);
+}
+`
+
+	err := lowerErr(t, src)
+	if !strings.Contains(err.Error(), "unsupported in current subset: function call target") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLower_VoidCallAllowedInExpressionStatement(t *testing.T) {
+	src := `
+void ping() {
+	return;
+}
+int main() {
+	ping();
+	return 0;
+}
+`
+
 	_ = lowerOK(t, src)
+}
+
+func TestLower_RejectsVoidCallInValueContext(t *testing.T) {
+	src := `
+void ping() {
+	return;
+}
+int main() {
+	return ping();
+}
+`
+
+	err := lowerErr(t, src)
+	if !strings.Contains(err.Error(), "return type mismatch") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLower_CharacterLiteralSimpleAndEscaped(t *testing.T) {
+	src := `
+int main() {
+	int a = 'a';
+	int b = '\n';
+	int c = '\'';
+	return a + b + c;
+}
+`
+
+	text := lowerText(t, src)
+	for _, want := range []string{"const.i32 97", "const.i32 10", "const.i32 39"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected TAC to contain %q, got:\n%s", want, text)
+		}
+	}
+}
+
+func TestLower_RejectsMalformedCharacterLiteral(t *testing.T) {
+	src := `
+int main() {
+	int a = 'ab';
+	return a;
+}
+`
+
+	err := lowerErr(t, src)
+	if !strings.Contains(err.Error(), "multi-character literals are unsupported") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestLower_RequiresReturnForIntFunction(t *testing.T) {

@@ -1,6 +1,7 @@
 package sema
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/SQLek/wihajster/internal/lexer"
@@ -14,48 +15,36 @@ type functionSignature struct {
 }
 
 type variableSymbol struct {
-	Type     string
-	Slot     string
-	IsGlobal bool
+	Type string
+	Slot string
+}
+
+type typedValue struct {
+	Value string
+	Type  string
 }
 
 type lowerer struct {
 	fn          *tac.Function
 	nextLabelID int
 
-	scopes  []map[string]variableSymbol
-	globals map[string]variableSymbol
+	returnType string
+	functions  map[string]functionSignature
+	scopes     []map[string]variableSymbol
 }
 
 func Lower(tu *parser.TranslationUnit) (tac.Module, error) {
-	globals := map[string]variableSymbol{}
+	if len(tu.Declarations) > 0 {
+		return tac.Module{}, unsupportedError(tu.Declarations[0].Token, "global declarations")
+	}
+
 	prototypes := map[string]functionSignature{}
 	definitions := map[string]functionSignature{}
-
-	for _, decl := range tu.Declarations {
-		typ, err := lowerObjectType(decl.Token, decl.Type)
-		if err != nil {
-			return tac.Module{}, err
-		}
-		if _, exists := globals[decl.Name]; exists {
-			return tac.Module{}, newError(decl.Token, "global %s redeclared", decl.Name)
-		}
-		if _, exists := prototypes[decl.Name]; exists {
-			return tac.Module{}, newError(decl.Token, "name %s already declared as function", decl.Name)
-		}
-		if _, exists := definitions[decl.Name]; exists {
-			return tac.Module{}, newError(decl.Token, "name %s already declared as function", decl.Name)
-		}
-		globals[decl.Name] = variableSymbol{Type: typ, IsGlobal: true}
-	}
 
 	for _, proto := range tu.Prototypes {
 		sig, err := signatureForFunction(proto.Token, proto.ReturnType, proto.Parameters)
 		if err != nil {
 			return tac.Module{}, err
-		}
-		if _, exists := globals[proto.Name]; exists {
-			return tac.Module{}, newError(proto.Token, "name %s already declared as global", proto.Name)
 		}
 		if prev, exists := prototypes[proto.Name]; exists {
 			if !sameSignature(prev, sig) {
@@ -74,9 +63,6 @@ func Lower(tu *parser.TranslationUnit) (tac.Module, error) {
 		if err != nil {
 			return tac.Module{}, err
 		}
-		if _, exists := globals[pfn.Name]; exists {
-			return tac.Module{}, newError(pfn.Token, "name %s already declared as global", pfn.Name)
-		}
 		if prev, exists := definitions[pfn.Name]; exists {
 			if sameSignature(prev, sig) {
 				return tac.Module{}, newError(pfn.Token, "function %s defined multiple times", pfn.Name)
@@ -89,9 +75,17 @@ func Lower(tu *parser.TranslationUnit) (tac.Module, error) {
 		definitions[pfn.Name] = sig
 	}
 
+	functions := map[string]functionSignature{}
+	for name, sig := range prototypes {
+		functions[name] = sig
+	}
+	for name, sig := range definitions {
+		functions[name] = sig
+	}
+
 	mod := tac.Module{}
 	for _, pfn := range tu.Functions {
-		fn, err := lowerFunction(pfn, globals)
+		fn, err := lowerFunction(pfn, functions)
 		if err != nil {
 			return tac.Module{}, err
 		}
@@ -100,14 +94,14 @@ func Lower(tu *parser.TranslationUnit) (tac.Module, error) {
 	return mod, nil
 }
 
-func lowerFunction(pfn parser.FunctionDefinition, globals map[string]variableSymbol) (tac.Function, error) {
+func lowerFunction(pfn parser.FunctionDefinition, functions map[string]functionSignature) (tac.Function, error) {
 	retType := lowerType(pfn.ReturnType)
 	if retType == "" {
 		return tac.Function{}, unsupportedError(pfn.Token, "function return type")
 	}
 
 	fn := tac.Function{Name: "@" + pfn.Name, ReturnType: retType}
-	l := &lowerer{fn: &fn, globals: globals}
+	l := &lowerer{fn: &fn, returnType: retType, functions: functions}
 	l.pushScope()
 	defer l.popScope()
 
@@ -116,7 +110,7 @@ func lowerFunction(pfn parser.FunctionDefinition, globals map[string]variableSym
 		if err != nil {
 			return tac.Function{}, err
 		}
-		if err := l.declareLocal(param.Token, param.Name, paramType, "%"+param.Name); err != nil {
+		if err := l.declareLocal(param.Token, param.Name, paramType); err != nil {
 			return tac.Function{}, err
 		}
 		fn.Parameters = append(fn.Parameters, tac.Parameter{Name: "%" + param.Name, Type: paramType})
@@ -221,12 +215,12 @@ func (l *lowerer) setLocalSlot(name, slot string) {
 	scope[name] = sym
 }
 
-func (l *lowerer) declareLocal(tok lexer.Token, name, typ, slot string) error {
+func (l *lowerer) declareLocal(tok lexer.Token, name, typ string) error {
 	scope := l.currentScope()
 	if _, exists := scope[name]; exists {
 		return newError(tok, "identifier %s redeclared in this scope", name)
 	}
-	scope[name] = variableSymbol{Type: typ, Slot: slot}
+	scope[name] = variableSymbol{Type: typ}
 	return nil
 }
 
@@ -236,8 +230,7 @@ func (l *lowerer) resolveVariable(name string) (variableSymbol, bool) {
 			return sym, true
 		}
 	}
-	sym, ok := l.globals[name]
-	return sym, ok
+	return variableSymbol{}, false
 }
 
 func (l *lowerer) lowerBlockStatements(stmts []parser.Statement) (bool, error) {
@@ -272,14 +265,24 @@ func (l *lowerer) lowerStatement(stmt parser.Statement) (bool, error) {
 		return true, err
 	case parser.ReturnStatement:
 		if s.Expression == nil {
+			if l.returnType != "void" {
+				return false, newError(s.Token, "non-void function must return a value")
+			}
 			l.fn.AddRet("")
 			return false, nil
 		}
+
 		val, err := l.lowerExpr(s.Expression)
 		if err != nil {
 			return false, err
 		}
-		l.fn.AddRet(val)
+		if l.returnType == "void" {
+			return false, newError(s.Token, "void function must not return a value")
+		}
+		if val.Type != l.returnType {
+			return false, newError(s.Token, "return type mismatch: expected %s, got %s", l.returnType, val.Type)
+		}
+		l.fn.AddRet(val.Value)
 		return false, nil
 	case parser.IfStatement:
 		return l.lowerIfStatement(s)
@@ -297,7 +300,7 @@ func (l *lowerer) lowerLocalDeclaration(decl parser.Declaration) error {
 	if err != nil {
 		return err
 	}
-	if err := l.declareLocal(decl.Token, decl.Name, typ, ""); err != nil {
+	if err := l.declareLocal(decl.Token, decl.Name, typ); err != nil {
 		return err
 	}
 	slot := l.fn.AddInstruction("alloca", typ)
@@ -309,7 +312,10 @@ func (l *lowerer) lowerLocalDeclaration(decl parser.Declaration) error {
 	if err != nil {
 		return err
 	}
-	l.fn.AddVoidInstruction("store", slot, value)
+	if value.Type != typ {
+		return newError(decl.Token, "initializer type mismatch for %s: expected %s, got %s", decl.Name, typ, value.Type)
+	}
+	l.fn.AddVoidInstruction("store", slot, value.Value)
 	return nil
 }
 
@@ -318,11 +324,14 @@ func (l *lowerer) lowerIfStatement(s parser.IfStatement) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if cond.Type == "void" {
+		return false, newError(s.Token, "if condition cannot have void type")
+	}
 
 	thenLabel := l.newLabel()
 	endLabel := l.newLabel()
 	if s.Else == nil {
-		l.fn.AddBr(cond, thenLabel, endLabel)
+		l.fn.AddBr(cond.Value, thenLabel, endLabel)
 		l.fn.AddLabel(thenLabel)
 		thenReachable, err := l.lowerStatement(s.Then)
 		if err != nil {
@@ -336,7 +345,7 @@ func (l *lowerer) lowerIfStatement(s parser.IfStatement) (bool, error) {
 	}
 
 	elseLabel := l.newLabel()
-	l.fn.AddBr(cond, thenLabel, elseLabel)
+	l.fn.AddBr(cond.Value, thenLabel, elseLabel)
 
 	l.fn.AddLabel(thenLabel)
 	thenReachable, err := l.lowerStatement(s.Then)
@@ -374,7 +383,10 @@ func (l *lowerer) lowerWhileStatement(s parser.WhileStatement) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	l.fn.AddBr(cond, bodyLabel, endLabel)
+	if cond.Type == "void" {
+		return false, newError(s.Token, "while condition cannot have void type")
+	}
+	l.fn.AddBr(cond.Value, bodyLabel, endLabel)
 
 	l.fn.AddLabel(bodyLabel)
 	bodyReachable, err := l.lowerStatement(s.Body)
@@ -415,7 +427,10 @@ func (l *lowerer) lowerForStatement(s parser.ForStatement) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		l.fn.AddBr(cond, bodyLabel, endLabel)
+		if cond.Type == "void" {
+			return false, newError(s.Token, "for condition cannot have void type")
+		}
+		l.fn.AddBr(cond.Value, bodyLabel, endLabel)
 	} else {
 		l.fn.AddJmp(bodyLabel)
 	}
@@ -443,81 +458,158 @@ func (l *lowerer) lowerForStatement(s parser.ForStatement) (bool, error) {
 	return true, nil
 }
 
-func (l *lowerer) lowerExpr(expr parser.Expression) (string, error) {
+func (l *lowerer) lowerExpr(expr parser.Expression) (typedValue, error) {
 	switch e := expr.(type) {
 	case parser.IntegerLiteralExpression:
 		if _, err := strconv.ParseInt(e.Raw, 10, 32); err != nil {
-			return "", newError(e.Token, "invalid integer literal %q", e.Raw)
+			return typedValue{}, newError(e.Token, "invalid integer literal %q", e.Raw)
 		}
-		return l.fn.AddInstruction("const.i32", e.Raw), nil
+		return typedValue{Value: l.fn.AddInstruction("const.i32", e.Raw), Type: "i32"}, nil
 	case parser.CharacterLiteralExpression:
-		return "", unsupportedError(e.Token, "character literals")
+		value, err := decodeCharacterLiteral(e.Raw)
+		if err != nil {
+			return typedValue{}, newError(e.Token, "%s", err.Error())
+		}
+		return typedValue{Value: l.fn.AddInstruction("const.i32", strconv.FormatInt(int64(value), 10)), Type: "i32"}, nil
 	case parser.IdentifierExpression:
 		sym, ok := l.resolveVariable(e.Name)
 		if !ok {
-			return "", newError(e.Token, "use of undeclared identifier %s", e.Name)
+			return typedValue{}, newError(e.Token, "use of undeclared identifier %s", e.Name)
 		}
-		if sym.IsGlobal {
-			return "", newError(e.Token, "not yet supported in M1 TAC lowering: global variable access")
-		}
-		return l.fn.AddInstruction("load", sym.Slot), nil
+		return typedValue{Value: l.fn.AddInstruction("load", sym.Slot), Type: sym.Type}, nil
 	case parser.UnaryExpression:
 		operand, err := l.lowerExpr(e.Operand)
 		if err != nil {
-			return "", err
+			return typedValue{}, err
+		}
+		if operand.Type == "void" {
+			return typedValue{}, newError(e.Token, "unary operator requires non-void operand")
 		}
 		switch e.Op {
 		case lexer.TokenPlus:
 			return operand, nil
 		case lexer.TokenMinus:
-			return l.fn.AddInstruction("neg", operand), nil
+			return typedValue{Value: l.fn.AddInstruction("neg", operand.Value), Type: operand.Type}, nil
 		case lexer.TokenBang:
-			return l.fn.AddInstruction("logic_not", operand), nil
+			return typedValue{Value: l.fn.AddInstruction("logic_not", operand.Value), Type: "i32"}, nil
 		case lexer.TokenTilde:
-			return l.fn.AddInstruction("not", operand), nil
+			return typedValue{Value: l.fn.AddInstruction("not", operand.Value), Type: operand.Type}, nil
 		default:
-			return "", unsupportedError(e.Token, "unary operator")
+			return typedValue{}, unsupportedError(e.Token, "unary operator")
 		}
 	case parser.BinaryExpression:
 		lhs, err := l.lowerExpr(e.LHS)
 		if err != nil {
-			return "", err
+			return typedValue{}, err
 		}
 		rhs, err := l.lowerExpr(e.RHS)
 		if err != nil {
-			return "", err
+			return typedValue{}, err
+		}
+		if lhs.Type == "void" || rhs.Type == "void" {
+			return typedValue{}, newError(e.Token, "binary operator requires non-void operands")
 		}
 		opcode := binaryOpcode(e.Op)
 		if opcode == "" {
-			return "", unsupportedError(e.Token, "binary operator")
+			return typedValue{}, unsupportedError(e.Token, "binary operator")
 		}
 		if e.Op == lexer.TokenAndAnd || e.Op == lexer.TokenOrOr {
-			lhs = l.fn.AddInstruction("ne", lhs, "0")
-			rhs = l.fn.AddInstruction("ne", rhs, "0")
+			lhsVal := l.fn.AddInstruction("ne", lhs.Value, "0")
+			rhsVal := l.fn.AddInstruction("ne", rhs.Value, "0")
+			return typedValue{Value: l.fn.AddInstruction(opcode, lhsVal, rhsVal), Type: "i32"}, nil
 		}
-		return l.fn.AddInstruction(opcode, lhs, rhs), nil
+
+		resultType := lhs.Type
+		switch e.Op {
+		case lexer.TokenEq, lexer.TokenNe, lexer.TokenLt, lexer.TokenLe, lexer.TokenGt, lexer.TokenGe:
+			resultType = "i32"
+		}
+		return typedValue{Value: l.fn.AddInstruction(opcode, lhs.Value, rhs.Value), Type: resultType}, nil
 	case parser.AssignmentExpression:
 		ident, ok := e.LHS.(parser.IdentifierExpression)
 		if !ok {
-			return "", unsupportedError(e.Token, "assignment target")
+			return typedValue{}, unsupportedError(e.Token, "assignment target")
 		}
 		sym, ok := l.resolveVariable(ident.Name)
 		if !ok {
-			return "", newError(e.Token, "use of undeclared identifier %s", ident.Name)
-		}
-		if sym.IsGlobal {
-			return "", newError(e.Token, "not yet supported in M1 TAC lowering: global variable access")
+			return typedValue{}, newError(e.Token, "use of undeclared identifier %s", ident.Name)
 		}
 		rhs, err := l.lowerExpr(e.RHS)
 		if err != nil {
-			return "", err
+			return typedValue{}, err
 		}
-		l.fn.AddVoidInstruction("store", sym.Slot, rhs)
+		if rhs.Type != sym.Type {
+			return typedValue{}, newError(e.Token, "assignment type mismatch: expected %s, got %s", sym.Type, rhs.Type)
+		}
+		l.fn.AddVoidInstruction("store", sym.Slot, rhs.Value)
 		return rhs, nil
 	case parser.CallExpression:
-		return "", unsupportedError(e.Token, "function calls")
+		callee, ok := e.Callee.(parser.IdentifierExpression)
+		if !ok {
+			return typedValue{}, unsupportedError(e.Token, "function call target")
+		}
+		sig, exists := l.functions[callee.Name]
+		if !exists {
+			return typedValue{}, newError(callee.Token, "call to undeclared function %s", callee.Name)
+		}
+		if len(e.Args) != len(sig.Params) {
+			return typedValue{}, newError(e.Token, "function %s expects %d arguments, got %d", callee.Name, len(sig.Params), len(e.Args))
+		}
+		args := make([]string, 0, len(e.Args))
+		for i, argExpr := range e.Args {
+			arg, err := l.lowerExpr(argExpr)
+			if err != nil {
+				return typedValue{}, err
+			}
+			expected := sig.Params[i]
+			if arg.Type != expected {
+				return typedValue{}, newError(e.Token, "argument %d to %s has type %s, expected %s", i+1, callee.Name, arg.Type, expected)
+			}
+			args = append(args, arg.Value)
+		}
+		calleeName := "@" + callee.Name
+		if sig.ReturnType == "void" {
+			l.fn.AddCallVoid(calleeName, args...)
+			return typedValue{Type: "void"}, nil
+		}
+		return typedValue{Value: l.fn.AddCall(calleeName, args...), Type: sig.ReturnType}, nil
 	default:
-		return "", unsupportedError(lexer.Token{}, "expression kind")
+		return typedValue{}, unsupportedError(lexer.Token{}, "expression kind")
+	}
+}
+
+func decodeCharacterLiteral(raw string) (int32, error) {
+	if len(raw) < 3 || raw[0] != '\'' || raw[len(raw)-1] != '\'' {
+		return 0, fmt.Errorf("invalid character literal %q", raw)
+	}
+	body := raw[1 : len(raw)-1]
+	if len(body) == 0 {
+		return 0, fmt.Errorf("invalid character literal %q", raw)
+	}
+	if body[0] != '\\' {
+		if len(body) != 1 {
+			return 0, fmt.Errorf("multi-character literals are unsupported: %q", raw)
+		}
+		return int32(body[0]), nil
+	}
+	if len(body) != 2 {
+		return 0, fmt.Errorf("invalid escape in character literal %q", raw)
+	}
+	switch body[1] {
+	case '\\':
+		return int32('\\'), nil
+	case '\'':
+		return int32('\''), nil
+	case 'n':
+		return int32('\n'), nil
+	case 't':
+		return int32('\t'), nil
+	case 'r':
+		return int32('\r'), nil
+	case '0':
+		return int32(0), nil
+	default:
+		return 0, fmt.Errorf("unsupported escape in character literal %q", raw)
 	}
 }
 

@@ -33,7 +33,7 @@ func lexStringLiteral(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 		return tokenNil, fmt.Errorf("unexpected newline in string literal at %d:%d", s.line, s.column)
 	}
 
-	// we have '\' at cursor, lets pop it and see if we have escape, or line continuation
+	// we have '\\' at cursor, lets pop it and see if we have escape, or line continuation
 	s.popOneFromBuffer()
 	switch b, err := s.peekOne(); {
 	case err != nil:
@@ -78,7 +78,7 @@ func lexCharacterConstant(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 		return tokenNil, fmt.Errorf("unexpected newline in character literal at %d:%d", s.line, s.column)
 	}
 
-	// we have '\' at cursor, lets pop it and see if we have escape, or line continuation
+	// we have '\\' at cursor, lets pop it and see if we have escape, or line continuation
 	s.popOneFromBuffer()
 	switch b, err := s.peekOne(); {
 	case err != nil:
@@ -89,9 +89,9 @@ func lexCharacterConstant(s *scanner, buildFn tokenBuildFn) (TokenType, error) {
 		s.popOneFromBuffer()
 		return lexCharacterConstant(s, buildFn)
 
-	case b == '\'':
-		buff1Char[0] = s.popOneFromBuffer()
-		buildFn(buff1Char)
+	case b == '\'', b == '\\', b == 'n', b == 't', b == 'r', b == '0':
+		esc := s.popOneFromBuffer()
+		buildFn([]byte{'\\', esc})
 		return lexCharacterConstant(s, buildFn)
 
 	default:

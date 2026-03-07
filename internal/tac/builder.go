@@ -1,6 +1,9 @@
 package tac
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // NewTemp allocates a new deterministic temporary name for the function.
 // Names are monotonically increasing: %t0, %t1, ...
@@ -30,6 +33,23 @@ func (f *Function) AddVoidInstruction(opcode string, operands ...string) {
 		Opcode:   opcode,
 		Operands: append([]string(nil), operands...),
 	})
+}
+
+// AddCall emits a value-producing function call.
+func (f *Function) AddCall(callee string, args ...string) string {
+	return f.AddInstruction("call", formatCallOperand(callee, args))
+}
+
+// AddCallVoid emits a call with ignored return value.
+func (f *Function) AddCallVoid(callee string, args ...string) {
+	f.AddVoidInstruction("call", formatCallOperand(callee, args))
+}
+
+func formatCallOperand(callee string, args []string) string {
+	if len(args) == 0 {
+		return callee + "()"
+	}
+	return callee + "(" + strings.Join(args, ", ") + ")"
 }
 
 // AddLabel appends a label instruction.

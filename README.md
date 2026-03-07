@@ -50,7 +50,7 @@ Supported in v0:
   - `for`
   - `return`
 - function definitions and direct calls (non-variadic)
-- global and local scalar declarations
+- local scalar declarations (globals deferred)
 
 Rejected in v0 (must fail with clear diagnostics):
 
@@ -131,3 +131,4 @@ Exit criteria:
 - Add tests before broadening grammar coverage
 - Minimize third-party dependencies
 - Prioritize correctness and readability over premature optimization
+
