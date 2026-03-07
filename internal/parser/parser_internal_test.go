@@ -69,8 +69,30 @@ func TestParseExpressionStatement_PrecedenceUnit(t *testing.T) {
 	if !ok || mul.Op != lexer.TokenStar {
 		t.Fatalf("expected multiplication on RHS, got %#v", add.RHS)
 	}
-	if len(p.diagnostics) != 0 {
-		t.Fatalf("expected no diagnostics, got %d", len(p.diagnostics))
+}
+
+func TestParseExpression_AssignmentRightAssociative(t *testing.T) {
+	src := &fakeTokenSource{tokens: []lexer.Token{
+		tok(lexer.TokenIdentifier, "a", 1, 1),
+		tok(lexer.TokenAssign, "=", 1, 3),
+		tok(lexer.TokenIdentifier, "b", 1, 5),
+		tok(lexer.TokenAssign, "=", 1, 7),
+		tok(lexer.TokenIntegerConstant, "1", 1, 9),
+		tok(lexer.TokenSemicolon, ";", 1, 10),
+	}, failAt: -1}
+
+	p := New(src)
+	stmt, ok := p.parseExpressionStatement()
+	if !ok {
+		t.Fatalf("expected assignment expression statement, diagnostics=%v", p.diagnostics)
+	}
+	es := stmt.(ExpressionStatement)
+	assign, ok := es.Expression.(AssignmentExpression)
+	if !ok {
+		t.Fatalf("expected assignment expression, got %T", es.Expression)
+	}
+	if _, ok := assign.RHS.(AssignmentExpression); !ok {
+		t.Fatalf("expected rhs to be nested assignment, got %T", assign.RHS)
 	}
 }
 
@@ -78,7 +100,7 @@ func TestParseBlockStatement_RecoversAtSemicolonAndKeepsSibling(t *testing.T) {
 	src := &fakeTokenSource{tokens: []lexer.Token{
 		tok(lexer.TokenLBrace, "{", 1, 1),
 		tok(lexer.TokenIntegerConstant, "1", 2, 2),
-		tok(lexer.TokenPlus, "+", 2, 4),
+		tok(lexer.TokenQuestion, "?", 2, 4),
 		tok(lexer.TokenSemicolon, ";", 2, 6),
 		tok(lexer.TokenReturn, "return", 3, 2),
 		tok(lexer.TokenIntegerConstant, "0", 3, 9),

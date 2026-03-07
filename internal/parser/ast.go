@@ -6,18 +6,40 @@ type TypeSpecifier int
 
 const (
 	TypeSpecifierInt TypeSpecifier = iota
+	TypeSpecifierChar
 	TypeSpecifierVoid
 )
 
+type TypeName struct {
+	Token        lexer.Token
+	Specifier    TypeSpecifier
+	PointerDepth int
+}
+
 type TranslationUnit struct {
-	Functions []FunctionDefinition
+	Functions    []FunctionDefinition
+	Declarations []Declaration
+}
+
+type FunctionParameter struct {
+	Token lexer.Token
+	Type  TypeName
+	Name  string
 }
 
 type FunctionDefinition struct {
-	ReturnType TypeSpecifier
+	ReturnType TypeName
 	Name       string
+	Parameters []FunctionParameter
 	Body       BlockStatement
 	Token      lexer.Token
+}
+
+type Declaration struct {
+	Token       lexer.Token
+	Type        TypeName
+	Name        string
+	Initializer Expression
 }
 
 type Statement interface {
@@ -30,6 +52,13 @@ type BlockStatement struct {
 }
 
 func (BlockStatement) statementNode() {}
+
+type DeclarationStatement struct {
+	Token       lexer.Token
+	Declaration Declaration
+}
+
+func (DeclarationStatement) statementNode() {}
 
 type ReturnStatement struct {
 	Token      lexer.Token
@@ -62,6 +91,16 @@ type WhileStatement struct {
 
 func (WhileStatement) statementNode() {}
 
+type ForStatement struct {
+	Token lexer.Token
+	Init  Statement
+	Cond  Expression
+	Post  Expression
+	Body  Statement
+}
+
+func (ForStatement) statementNode() {}
+
 type Expression interface {
 	expressionNode()
 }
@@ -80,6 +119,13 @@ type IntegerLiteralExpression struct {
 
 func (IntegerLiteralExpression) expressionNode() {}
 
+type CharacterLiteralExpression struct {
+	Token lexer.Token
+	Raw   string
+}
+
+func (CharacterLiteralExpression) expressionNode() {}
+
 type UnaryExpression struct {
 	Token   lexer.Token
 	Op      lexer.TokenType
@@ -96,3 +142,19 @@ type BinaryExpression struct {
 }
 
 func (BinaryExpression) expressionNode() {}
+
+type AssignmentExpression struct {
+	Token lexer.Token
+	LHS   Expression
+	RHS   Expression
+}
+
+func (AssignmentExpression) expressionNode() {}
+
+type CallExpression struct {
+	Token  lexer.Token
+	Callee Expression
+	Args   []Expression
+}
+
+func (CallExpression) expressionNode() {}
