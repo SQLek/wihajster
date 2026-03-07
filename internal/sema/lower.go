@@ -40,7 +40,7 @@ func lowerFunction(pfn parser.FunctionDefinition) (tac.Function, error) {
 		return tac.Function{}, err
 	}
 	if reachable {
-		if pfn.ReturnType == parser.TypeSpecifierVoid {
+		if pfn.ReturnType.Specifier == parser.TypeSpecifierVoid {
 			fn.AddRet("")
 		} else {
 			return tac.Function{}, newError(pfn.Token, "function %s may reach end without return", pfn.Name)
@@ -50,9 +50,14 @@ func lowerFunction(pfn parser.FunctionDefinition) (tac.Function, error) {
 	return fn, nil
 }
 
-func lowerType(t parser.TypeSpecifier) string {
-	switch t {
+func lowerType(t parser.TypeName) string {
+	if t.PointerDepth > 0 {
+		return ""
+	}
+	switch t.Specifier {
 	case parser.TypeSpecifierInt:
+		return "i32"
+	case parser.TypeSpecifierChar:
 		return "i32"
 	case parser.TypeSpecifierVoid:
 		return "void"
@@ -76,6 +81,8 @@ func (l *lowerer) lowerStatement(stmt parser.Statement) (bool, error) {
 			reachable = nextReachable
 		}
 		return reachable, nil
+	case parser.DeclarationStatement:
+		return false, unsupportedError(s.Token, "local declarations")
 	case parser.ExpressionStatement:
 		if s.Expression == nil {
 			return true, nil
@@ -97,6 +104,8 @@ func (l *lowerer) lowerStatement(stmt parser.Statement) (bool, error) {
 		return l.lowerIfStatement(s)
 	case parser.WhileStatement:
 		return l.lowerWhileStatement(s)
+	case parser.ForStatement:
+		return false, unsupportedError(s.Token, "for statements")
 	default:
 		return false, unsupportedError(lexer.Token{}, "statement kind")
 	}
@@ -185,6 +194,8 @@ func (l *lowerer) lowerExpr(expr parser.Expression) (string, error) {
 			return "", newError(e.Token, "invalid integer literal %q", e.Raw)
 		}
 		return l.fn.AddInstruction("const.i32", e.Raw), nil
+	case parser.CharacterLiteralExpression:
+		return "", unsupportedError(e.Token, "character literals")
 	case parser.IdentifierExpression:
 		return "", unsupportedError(e.Token, "identifiers without declarations")
 	case parser.UnaryExpression:
@@ -222,6 +233,10 @@ func (l *lowerer) lowerExpr(expr parser.Expression) (string, error) {
 			rhs = l.fn.AddInstruction("ne", rhs, "0")
 		}
 		return l.fn.AddInstruction(opcode, lhs, rhs), nil
+	case parser.AssignmentExpression:
+		return "", unsupportedError(e.Token, "assignment expressions")
+	case parser.CallExpression:
+		return "", unsupportedError(e.Token, "function calls")
 	default:
 		return "", unsupportedError(lexer.Token{}, "expression kind")
 	}

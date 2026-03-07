@@ -38,9 +38,13 @@ func (p *Parser) ParseTranslationUnit() (*TranslationUnit, error) {
 			break
 		}
 
-		fn, ok := p.parseFunctionDefinition()
+		fn, decl, ok := p.parseExternalDeclaration()
 		if ok {
-			tu.Functions = append(tu.Functions, fn)
+			if fn != nil {
+				tu.Functions = append(tu.Functions, *fn)
+			} else {
+				tu.Declarations = append(tu.Declarations, *decl)
+			}
 			continue
 		}
 
@@ -56,69 +60,176 @@ func (p *Parser) ParseTranslationUnit() (*TranslationUnit, error) {
 	return tu, nil
 }
 
-func (p *Parser) parseFunctionDefinition() (FunctionDefinition, bool) {
-	typeTok, typ, ok := p.parseTypeSpecifier()
+func (p *Parser) parseExternalDeclaration() (*FunctionDefinition, *Declaration, bool) {
+	typeTok, typ, ok := p.parseTypeName()
 	if !ok {
-		return FunctionDefinition{}, false
+		return nil, nil, false
 	}
 
-	if p.peekTok().Type == lexer.TokenStar {
-		p.addDiagnostic(unsupportedError(p.peekTok(), "pointers"))
-		p.nextTok()
-		return FunctionDefinition{}, false
-	}
-
-	_, name, ok := p.expectIdent("function name")
+	nameTok, name, ptrDepth, ok := p.parseDeclarator("declaration name")
 	if !ok {
-		return FunctionDefinition{}, false
+		return nil, nil, false
 	}
+	typ.PointerDepth += ptrDepth
 
-	if !p.expectToken(lexer.TokenLParen, "'('") {
-		return FunctionDefinition{}, false
-	}
-
-	if tok := p.peekTok(); tok.Type != lexer.TokenRParen {
-		p.addDiagnostic(unsupportedError(tok, "function parameters"))
-		for tok.Type != lexer.TokenRParen && tok.Type != lexer.TokenEOF {
-			p.nextTok()
-			tok = p.peekTok()
+	if p.accept(lexer.TokenLParen) {
+		params, ok := p.parseParameterList()
+		if !ok {
+			return nil, nil, false
 		}
-	}
-	if !p.expectToken(lexer.TokenRParen, "')'") {
-		return FunctionDefinition{}, false
+		if !p.expectToken(lexer.TokenRParen, "')'") {
+			return nil, nil, false
+		}
+
+		if p.accept(lexer.TokenSemicolon) {
+			p.addDiagnostic(unsupportedError(nameTok, "function declarations without body"))
+			return nil, nil, false
+		}
+
+		body, ok := p.parseBlockStatement()
+		if !ok {
+			return nil, nil, false
+		}
+
+		fn := FunctionDefinition{
+			Token:      typeTok,
+			ReturnType: typ,
+			Name:       name,
+			Parameters: params,
+			Body:       body,
+		}
+		return &fn, nil, true
 	}
 
-	body, ok := p.parseBlockStatement()
+	decl, ok := p.parseDeclarationTail(typeTok, typ, nameTok, name)
 	if !ok {
-		return FunctionDefinition{}, false
+		return nil, nil, false
 	}
-
-	return FunctionDefinition{
-		Token:      typeTok,
-		ReturnType: typ,
-		Name:       name,
-		Body:       body,
-	}, true
+	return nil, &decl, true
 }
 
-func (p *Parser) parseTypeSpecifier() (lexer.Token, TypeSpecifier, bool) {
+func (p *Parser) parseTypeName() (lexer.Token, TypeName, bool) {
 	tok := p.peekTok()
 
 	switch tok.Type {
 	case lexer.TokenInt:
 		p.nextTok()
-		return tok, TypeSpecifierInt, true
+		return tok, TypeName{Token: tok, Specifier: TypeSpecifierInt}, true
+	case lexer.TokenChar:
+		p.nextTok()
+		return tok, TypeName{Token: tok, Specifier: TypeSpecifierChar}, true
 	case lexer.TokenVoid:
 		p.nextTok()
-		return tok, TypeSpecifierVoid, true
+		return tok, TypeName{Token: tok, Specifier: TypeSpecifierVoid}, true
 	case lexer.TokenStruct:
 		p.addDiagnostic(unsupportedError(tok, "struct declarations"))
 		p.nextTok()
-		return lexer.Token{}, 0, false
+		return lexer.Token{}, TypeName{}, false
+	case lexer.TokenUnion:
+		p.addDiagnostic(unsupportedError(tok, "union declarations"))
+		p.nextTok()
+		return lexer.Token{}, TypeName{}, false
+	case lexer.TokenEnum:
+		p.addDiagnostic(unsupportedError(tok, "enum declarations"))
+		p.nextTok()
+		return lexer.Token{}, TypeName{}, false
+	case lexer.TokenFloat, lexer.TokenDouble:
+		p.addDiagnostic(unsupportedError(tok, "floating-point types"))
+		p.nextTok()
+		return lexer.Token{}, TypeName{}, false
 	default:
 		p.addDiagnostic(newError(p.errorToken(tok), "expected type specifier, got %s", tokenDescription(tok)))
-		return lexer.Token{}, 0, false
+		return lexer.Token{}, TypeName{}, false
 	}
+}
+
+func (p *Parser) parseDeclarator(what string) (lexer.Token, string, int, bool) {
+	ptrDepth := 0
+	for p.accept(lexer.TokenStar) {
+		ptrDepth++
+	}
+
+	if p.peekTok().Type == lexer.TokenLParen {
+		tok := p.peekTok()
+		p.addDiagnostic(unsupportedError(tok, "function pointers"))
+		return lexer.Token{}, "", 0, false
+	}
+
+	tok, name, ok := p.expectIdent(what)
+	if !ok {
+		return lexer.Token{}, "", 0, false
+	}
+
+	if p.peekTok().Type == lexer.TokenLBracket {
+		p.addDiagnostic(unsupportedError(p.peekTok(), "arrays"))
+		return lexer.Token{}, "", 0, false
+	}
+
+	return tok, name, ptrDepth, true
+}
+
+func (p *Parser) parseParameterList() ([]FunctionParameter, bool) {
+	if p.peekTok().Type == lexer.TokenRParen {
+		return nil, true
+	}
+
+	if p.peekTok().Type == lexer.TokenEllipsis {
+		p.addDiagnostic(unsupportedError(p.peekTok(), "variadic functions"))
+		return nil, false
+	}
+
+	var params []FunctionParameter
+	for {
+		_, typ, ok := p.parseTypeName()
+		if !ok {
+			return nil, false
+		}
+		tok, name, ptrDepth, ok := p.parseDeclarator("parameter name")
+		if !ok {
+			return nil, false
+		}
+		typ.PointerDepth += ptrDepth
+		if typ.Specifier == TypeSpecifierVoid && typ.PointerDepth == 0 {
+			p.addDiagnostic(unsupportedError(tok, "void objects"))
+			return nil, false
+		}
+		params = append(params, FunctionParameter{Token: tok, Type: typ, Name: name})
+
+		if p.accept(lexer.TokenComma) {
+			if p.peekTok().Type == lexer.TokenEllipsis {
+				p.addDiagnostic(unsupportedError(p.peekTok(), "variadic functions"))
+				return nil, false
+			}
+			continue
+		}
+		break
+	}
+
+	return params, true
+}
+
+func (p *Parser) parseDeclarationTail(typeTok lexer.Token, typ TypeName, nameTok lexer.Token, name string) (Declaration, bool) {
+	decl := Declaration{Token: typeTok, Type: typ, Name: name}
+	if p.accept(lexer.TokenAssign) {
+		initExpr, ok := p.parseExpression(0)
+		if !ok {
+			return Declaration{}, false
+		}
+		if p.hasDisallowedExprTail() {
+			return Declaration{}, false
+		}
+		decl.Initializer = initExpr
+	}
+
+	if p.accept(lexer.TokenComma) {
+		p.addDiagnostic(unsupportedError(nameTok, "multiple declarators in one declaration"))
+		return Declaration{}, false
+	}
+
+	if !p.expectToken(lexer.TokenSemicolon, "';'") {
+		return Declaration{}, false
+	}
+	return decl, true
 }
 
 func (p *Parser) parseStatement() (Statement, bool) {
@@ -137,15 +248,52 @@ func (p *Parser) parseStatement() (Statement, bool) {
 		return p.parseIfStatement()
 	case lexer.TokenWhile:
 		return p.parseWhileStatement()
-	case lexer.TokenInt, lexer.TokenVoid:
-		p.addDiagnostic(unsupportedError(tok, "declarations beyond current subset"))
-		return nil, false
+	case lexer.TokenFor:
+		return p.parseForStatement()
+	case lexer.TokenInt, lexer.TokenChar, lexer.TokenVoid:
+		return p.parseDeclarationStatement()
 	case lexer.TokenStruct:
 		p.addDiagnostic(unsupportedError(tok, "struct declarations"))
+		return nil, false
+	case lexer.TokenSwitch:
+		p.addDiagnostic(unsupportedError(tok, "switch statements"))
+		return nil, false
+	case lexer.TokenGoto:
+		p.addDiagnostic(unsupportedError(tok, "goto statements"))
+		return nil, false
+	case lexer.TokenDo:
+		p.addDiagnostic(unsupportedError(tok, "do-while statements"))
+		return nil, false
+	case lexer.TokenBreak:
+		p.addDiagnostic(unsupportedError(tok, "break statements"))
+		return nil, false
+	case lexer.TokenContinue:
+		p.addDiagnostic(unsupportedError(tok, "continue statements"))
 		return nil, false
 	default:
 		return p.parseExpressionStatement()
 	}
+}
+
+func (p *Parser) parseDeclarationStatement() (Statement, bool) {
+	typeTok, typ, ok := p.parseTypeName()
+	if !ok {
+		return nil, false
+	}
+	nameTok, name, ptrDepth, ok := p.parseDeclarator("declaration name")
+	if !ok {
+		return nil, false
+	}
+	typ.PointerDepth += ptrDepth
+	if typ.Specifier == TypeSpecifierVoid && typ.PointerDepth == 0 {
+		p.addDiagnostic(unsupportedError(nameTok, "void objects"))
+		return nil, false
+	}
+	decl, ok := p.parseDeclarationTail(typeTok, typ, nameTok, name)
+	if !ok {
+		return nil, false
+	}
+	return DeclarationStatement{Token: typeTok, Declaration: decl}, true
 }
 
 func (p *Parser) parseBlockStatement() (BlockStatement, bool) {
@@ -189,6 +337,9 @@ func (p *Parser) parseReturnStatement() (Statement, bool) {
 	if !ok {
 		return nil, false
 	}
+	if p.hasDisallowedExprTail() {
+		return nil, false
+	}
 	if !p.expectToken(lexer.TokenSemicolon, "';'") {
 		return nil, false
 	}
@@ -205,6 +356,9 @@ func (p *Parser) parseIfStatement() (Statement, bool) {
 	}
 	cond, ok := p.parseExpression(0)
 	if !ok {
+		return nil, false
+	}
+	if p.hasDisallowedExprTail() {
 		return nil, false
 	}
 	if !p.expectToken(lexer.TokenRParen, "')'") {
@@ -238,6 +392,9 @@ func (p *Parser) parseWhileStatement() (Statement, bool) {
 	if !ok {
 		return nil, false
 	}
+	if p.hasDisallowedExprTail() {
+		return nil, false
+	}
 	if !p.expectToken(lexer.TokenRParen, "')'") {
 		return nil, false
 	}
@@ -249,6 +406,77 @@ func (p *Parser) parseWhileStatement() (Statement, bool) {
 	return WhileStatement{Token: whileTok, Cond: cond, Body: body}, true
 }
 
+func (p *Parser) parseForStatement() (Statement, bool) {
+	forTok, ok := p.expect(lexer.TokenFor, "'for'")
+	if !ok {
+		return nil, false
+	}
+	if !p.expectToken(lexer.TokenLParen, "'('") {
+		return nil, false
+	}
+
+	var init Statement
+	if p.accept(lexer.TokenSemicolon) {
+		init = nil
+	} else if isTypeSpecifierToken(p.peekTok().Type) {
+		stmt, ok := p.parseDeclarationStatement()
+		if !ok {
+			return nil, false
+		}
+		init = stmt
+	} else {
+		tok := p.peekTok()
+		expr, ok := p.parseExpression(0)
+		if !ok {
+			return nil, false
+		}
+		if p.hasDisallowedExprTail() {
+			return nil, false
+		}
+		if !p.expectToken(lexer.TokenSemicolon, "';'") {
+			return nil, false
+		}
+		init = ExpressionStatement{Token: tok, Expression: expr}
+	}
+
+	var cond Expression
+	if !p.accept(lexer.TokenSemicolon) {
+		parsedCond, ok := p.parseExpression(0)
+		if !ok {
+			return nil, false
+		}
+		if p.hasDisallowedExprTail() {
+			return nil, false
+		}
+		cond = parsedCond
+		if !p.expectToken(lexer.TokenSemicolon, "';'") {
+			return nil, false
+		}
+	}
+
+	var post Expression
+	if p.peekTok().Type != lexer.TokenRParen {
+		parsedPost, ok := p.parseExpression(0)
+		if !ok {
+			return nil, false
+		}
+		if p.hasDisallowedExprTail() {
+			return nil, false
+		}
+		post = parsedPost
+	}
+
+	if !p.expectToken(lexer.TokenRParen, "')'") {
+		return nil, false
+	}
+	body, ok := p.parseStatement()
+	if !ok {
+		return nil, false
+	}
+
+	return ForStatement{Token: forTok, Init: init, Cond: cond, Post: post, Body: body}, true
+}
+
 func (p *Parser) parseExpressionStatement() (Statement, bool) {
 	tok := p.peekTok()
 
@@ -258,6 +486,9 @@ func (p *Parser) parseExpressionStatement() (Statement, bool) {
 
 	expr, ok := p.parseExpression(0)
 	if !ok {
+		return nil, false
+	}
+	if p.hasDisallowedExprTail() {
 		return nil, false
 	}
 	if !p.expectToken(lexer.TokenSemicolon, "';'") {
@@ -274,6 +505,19 @@ func (p *Parser) parseExpression(minPrec int) (Expression, bool) {
 
 	for {
 		tok := p.peekTok()
+		if tok.Type == lexer.TokenAssign {
+			if minPrec > 0 {
+				return lhs, true
+			}
+			p.nextTok()
+			rhs, ok := p.parseExpression(0)
+			if !ok {
+				return nil, false
+			}
+			lhs = AssignmentExpression{Token: tok, LHS: lhs, RHS: rhs}
+			continue
+		}
+
 		prec := infixPrecedence(tok.Type)
 		if prec < minPrec {
 			return lhs, true
@@ -292,7 +536,7 @@ func (p *Parser) parseUnaryExpression() (Expression, bool) {
 	tok := p.peekTok()
 
 	switch tok.Type {
-	case lexer.TokenMinus, lexer.TokenBang, lexer.TokenTilde, lexer.TokenPlus:
+	case lexer.TokenMinus, lexer.TokenBang, lexer.TokenTilde, lexer.TokenPlus, lexer.TokenStar, lexer.TokenAmp:
 		p.nextTok()
 		op, ok := p.parseUnaryExpression()
 		if !ok {
@@ -300,8 +544,43 @@ func (p *Parser) parseUnaryExpression() (Expression, bool) {
 		}
 		return UnaryExpression{Token: tok, Op: tok.Type, Operand: op}, true
 	default:
-		return p.parsePrimaryExpression()
+		return p.parsePostfixExpression()
 	}
+}
+
+func (p *Parser) parsePostfixExpression() (Expression, bool) {
+	expr, ok := p.parsePrimaryExpression()
+	if !ok {
+		return nil, false
+	}
+
+	for p.accept(lexer.TokenLParen) {
+		callTok := p.last
+		var args []Expression
+		if p.peekTok().Type != lexer.TokenRParen {
+			for {
+				arg, ok := p.parseExpression(0)
+				if !ok {
+					return nil, false
+				}
+				if p.peekTok().Type == lexer.TokenQuestion {
+					p.addDiagnostic(unsupportedError(p.peekTok(), "ternary operator"))
+					return nil, false
+				}
+				args = append(args, arg)
+				if p.accept(lexer.TokenComma) {
+					continue
+				}
+				break
+			}
+		}
+		if !p.expectToken(lexer.TokenRParen, "')'") {
+			return nil, false
+		}
+		expr = CallExpression{Token: callTok, Callee: expr, Args: args}
+	}
+
+	return expr, true
 }
 
 func (p *Parser) parsePrimaryExpression() (Expression, bool) {
@@ -320,8 +599,15 @@ func (p *Parser) parsePrimaryExpression() (Expression, bool) {
 			return nil, false
 		}
 		return IntegerLiteralExpression{Token: tok, Raw: raw}, true
+	case lexer.TokenCharacterConstant:
+		tok := p.nextTok()
+		return CharacterLiteralExpression{Token: tok, Raw: string(tok.Raw)}, true
 	case lexer.TokenLParen:
-		p.nextTok()
+		openTok := p.nextTok()
+		if isTypeSpecifierToken(p.peekTok().Type) {
+			p.addDiagnostic(unsupportedError(openTok, "casts"))
+			return nil, false
+		}
 		expr, ok := p.parseExpression(0)
 		if !ok {
 			return nil, false
@@ -330,8 +616,8 @@ func (p *Parser) parsePrimaryExpression() (Expression, bool) {
 			return nil, false
 		}
 		return expr, true
-	case lexer.TokenStar:
-		p.addDiagnostic(unsupportedError(tok, "pointers"))
+	case lexer.TokenPlusPlus, lexer.TokenMinusMinus:
+		p.addDiagnostic(unsupportedError(tok, "increment/decrement operators"))
 		return nil, false
 	default:
 		p.addDiagnostic(newError(p.errorToken(tok), "expected expression, got %s", tokenDescription(tok)))
@@ -445,6 +731,25 @@ func (p *Parser) normalizeToken(tok lexer.Token, err error) lexer.Token {
 	return tok
 }
 
+func (p *Parser) hasDisallowedExprTail() bool {
+	tok := p.peekTok()
+	switch tok.Type {
+	case lexer.TokenQuestion:
+		p.addDiagnostic(unsupportedError(tok, "ternary operator"))
+		return true
+	case lexer.TokenComma:
+		p.addDiagnostic(unsupportedError(tok, "comma operator"))
+		return true
+	case lexer.TokenPlusAssign, lexer.TokenMinusAssign, lexer.TokenStarAssign, lexer.TokenSlashAssign,
+		lexer.TokenPercentAssign, lexer.TokenShiftLeftAssign, lexer.TokenShiftRightAssign,
+		lexer.TokenAmpAssign, lexer.TokenCaretAssign, lexer.TokenPipeAssign:
+		p.addDiagnostic(unsupportedError(tok, "compound assignment operators"))
+		return true
+	default:
+		return false
+	}
+}
+
 func (p *Parser) addDiagnostic(err *Error) {
 	if err != nil {
 		p.diagnostics = append(p.diagnostics, err)
@@ -477,7 +782,7 @@ func (p *Parser) synchronizeTopLevel() {
 	for {
 		tok := p.peekTok()
 		switch tok.Type {
-		case lexer.TokenEOF, lexer.TokenInt, lexer.TokenVoid:
+		case lexer.TokenEOF, lexer.TokenInt, lexer.TokenChar, lexer.TokenVoid:
 			return
 		default:
 			p.nextTok()
@@ -492,6 +797,15 @@ func (p *Parser) finishError() error {
 	return &ParseErrors{
 		FatalLexer:  p.fatalLexErr,
 		Diagnostics: p.diagnostics,
+	}
+}
+
+func isTypeSpecifierToken(tt lexer.TokenType) bool {
+	switch tt {
+	case lexer.TokenInt, lexer.TokenChar, lexer.TokenVoid:
+		return true
+	default:
+		return false
 	}
 }
 

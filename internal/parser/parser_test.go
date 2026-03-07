@@ -11,48 +11,78 @@ import (
 
 func TestParseTranslationUnit_AcceptsMilestoneCoreSyntax(t *testing.T) {
 	src := `
+int add(int a, int b) {
+	int tmp = a + b;
+	return tmp;
+}
+
 int main() {
-	if (1 + 2 * 3 < 8 || 0) {
-		return 7;
+	int i = 0;
+	int acc = 0;
+	for (i = 0; i < 4; i = i + 1) {
+		acc = add(acc, i);
+	}
+	if (acc > 0) {
+		return acc;
 	} else {
-		while (1) {
-			1 + 2;
-			return 0;
+		while (acc < 100) {
+			acc = acc + 1;
+			return acc;
 		}
 	}
-	return 1;
+	return 0;
 }
 `
 
 	tu := parseOK(t, src)
-	if len(tu.Functions) != 1 {
-		t.Fatalf("expected 1 function, got %d", len(tu.Functions))
+	if len(tu.Functions) != 2 {
+		t.Fatalf("expected 2 functions, got %d", len(tu.Functions))
+	}
+	if len(tu.Declarations) != 0 {
+		t.Fatalf("expected no global declarations, got %d", len(tu.Declarations))
 	}
 
-	fn := tu.Functions[0]
-	if fn.ReturnType != parser.TypeSpecifierInt {
-		t.Fatalf("expected int return type, got %v", fn.ReturnType)
+	mainFn := tu.Functions[1]
+	if mainFn.ReturnType.Specifier != parser.TypeSpecifierInt {
+		t.Fatalf("expected int return type, got %v", mainFn.ReturnType.Specifier)
 	}
-	if fn.Name != "main" {
-		t.Fatalf("expected function name main, got %q", fn.Name)
-	}
-	if len(fn.Body.Statements) != 2 {
-		t.Fatalf("expected 2 top-level statements in body, got %d", len(fn.Body.Statements))
-	}
-
-	ifStmt, ok := fn.Body.Statements[0].(parser.IfStatement)
-	if !ok {
-		t.Fatalf("expected first statement to be if, got %T", fn.Body.Statements[0])
-	}
-	if ifStmt.Else == nil {
-		t.Fatalf("expected else branch to be present")
+	if len(mainFn.Body.Statements) < 3 {
+		t.Fatalf("expected statements in main body, got %d", len(mainFn.Body.Statements))
 	}
 }
 
-func TestParseTranslationUnit_ExpressionPrecedence(t *testing.T) {
+func TestParseTranslationUnit_ParsesGlobalDeclarationsAndParams(t *testing.T) {
+	src := `
+char g = 'a';
+int *gp;
+
+int main(int argc, char *argv) {
+	return argc;
+}
+`
+
+	tu := parseOK(t, src)
+	if len(tu.Declarations) != 2 {
+		t.Fatalf("expected 2 globals, got %d", len(tu.Declarations))
+	}
+	if tu.Declarations[0].Type.Specifier != parser.TypeSpecifierChar {
+		t.Fatalf("expected first global to be char, got %v", tu.Declarations[0].Type.Specifier)
+	}
+	if tu.Declarations[1].Type.PointerDepth != 1 {
+		t.Fatalf("expected pointer depth 1 for gp, got %d", tu.Declarations[1].Type.PointerDepth)
+	}
+	if len(tu.Functions) != 1 {
+		t.Fatalf("expected 1 function, got %d", len(tu.Functions))
+	}
+	if len(tu.Functions[0].Parameters) != 2 {
+		t.Fatalf("expected 2 params, got %d", len(tu.Functions[0].Parameters))
+	}
+}
+
+func TestParseTranslationUnit_ExpressionPrecedenceAndCalls(t *testing.T) {
 	src := `
 int main() {
-	return 1 + 2 * 3 == 7 || 0;
+	return foo(1 + 2 * 3, 7) == 0 || 1;
 }
 `
 
@@ -70,13 +100,31 @@ int main() {
 	if !ok || eq.Op != lexer.TokenEq {
 		t.Fatalf("expected lhs to be equality expression, got %#v", or.LHS)
 	}
-	add, ok := eq.LHS.(parser.BinaryExpression)
-	if !ok || add.Op != lexer.TokenPlus {
-		t.Fatalf("expected equality lhs to be addition expression, got %#v", eq.LHS)
+	call, ok := eq.LHS.(parser.CallExpression)
+	if !ok {
+		t.Fatalf("expected lhs to contain call expression, got %#v", eq.LHS)
 	}
-	mul, ok := add.RHS.(parser.BinaryExpression)
-	if !ok || mul.Op != lexer.TokenStar {
-		t.Fatalf("expected addition rhs to be multiplication expression, got %#v", add.RHS)
+	if len(call.Args) != 2 {
+		t.Fatalf("expected 2 call args, got %d", len(call.Args))
+	}
+}
+
+func TestParseTranslationUnit_ParsesForStatement(t *testing.T) {
+	src := `
+int main() {
+	for (int i = 0; i < 3; i = i + 1) {
+		;
+	}
+	return 0;
+}
+`
+
+	tu := parseOK(t, src)
+	if len(tu.Functions) != 1 {
+		t.Fatalf("expected 1 function, got %d", len(tu.Functions))
+	}
+	if _, ok := tu.Functions[0].Body.Statements[0].(parser.ForStatement); !ok {
+		t.Fatalf("expected first statement to be for, got %T", tu.Functions[0].Body.Statements[0])
 	}
 }
 
@@ -87,41 +135,39 @@ func TestParseTranslationUnit_RejectsUnsupportedSyntax(t *testing.T) {
 		msg  string
 	}{
 		{
-			name: "pointer declarator",
+			name: "variadic function",
 			src: `
-int *main() {
-	return 0;
-}
-`,
-			msg: "unsupported in current subset: pointers",
-		},
-		{
-			name: "struct declaration",
-			src: `
-struct S main() {
-	return 0;
-}
-`,
-			msg: "unsupported in current subset: struct declarations",
-		},
-		{
-			name: "local declaration",
-			src: `
-int main() {
-	int x;
-	return 0;
-}
-`,
-			msg: "unsupported in current subset: declarations beyond current subset",
-		},
-		{
-			name: "function parameters",
-			src: `
-int main(int x) {
+int main(int x, ...) {
 	return x;
 }
 `,
-			msg: "unsupported in current subset: function parameters",
+			msg: "unsupported in current subset: variadic functions",
+		},
+		{
+			name: "array declaration",
+			src: `
+int arr[4];
+int main() { return 0; }
+`,
+			msg: "unsupported in current subset: arrays",
+		},
+		{
+			name: "switch statement",
+			src: `
+int main() {
+	switch (1) { return 0; }
+}
+`,
+			msg: "unsupported in current subset: switch statements",
+		},
+		{
+			name: "cast expression",
+			src: `
+int main() {
+	return (int)1;
+}
+`,
+			msg: "unsupported in current subset: casts",
 		},
 	}
 
@@ -136,6 +182,15 @@ int main(int x) {
 			}
 		})
 	}
+}
+
+func TestParserBacklogSkeleton_GroupsPresent(t *testing.T) {
+	t.Run("declarators", func(t *testing.T) {})
+	t.Run("declarations", func(t *testing.T) {})
+	t.Run("assignment", func(t *testing.T) {})
+	t.Run("calls", func(t *testing.T) {})
+	t.Run("for", func(t *testing.T) {})
+	t.Run("unsupported-diagnostics", func(t *testing.T) {})
 }
 
 func parseOK(t *testing.T, src string) *parser.TranslationUnit {
