@@ -79,6 +79,25 @@ int main(int argc, char *argv) {
 	}
 }
 
+func TestParseTranslationUnit_ParsesFunctionPrototype(t *testing.T) {
+	src := `
+int id(int x);
+int main() {
+	return 0;
+}
+`
+
+	tu := parseOK(t, src)
+	if len(tu.Prototypes) != 1 {
+		t.Fatalf("expected 1 prototype, got %d", len(tu.Prototypes))
+	}
+	if tu.Prototypes[0].Name != "id" {
+		t.Fatalf("expected prototype name id, got %s", tu.Prototypes[0].Name)
+	}
+	if len(tu.Prototypes[0].Parameters) != 1 {
+		t.Fatalf("expected prototype parameter count 1, got %d", len(tu.Prototypes[0].Parameters))
+	}
+}
 func TestParseTranslationUnit_ExpressionPrecedenceAndCalls(t *testing.T) {
 	src := `
 int main() {

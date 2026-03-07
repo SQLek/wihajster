@@ -12,7 +12,7 @@ var coreOpcodes = map[string]struct{}{
 	"add": {}, "sub": {}, "mul": {}, "div_s": {}, "mod_s": {},
 	"and": {}, "or": {}, "xor": {}, "shl": {}, "shr_s": {},
 	"eq": {}, "ne": {}, "lt_s": {}, "le_s": {}, "gt_s": {}, "ge_s": {},
-	"neg": {}, "not": {}, "logic_not": {}, "call": {},
+	"neg": {}, "not": {}, "logic_not": {}, "call": {}, "alloca": {}, "load": {}, "store": {},
 }
 
 var optionalOpcodes = map[string]struct{}{

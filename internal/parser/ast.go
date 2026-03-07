@@ -19,6 +19,7 @@ type TypeName struct {
 type TranslationUnit struct {
 	Functions    []FunctionDefinition
 	Declarations []Declaration
+	Prototypes   []FunctionPrototype
 }
 
 type FunctionParameter struct {
@@ -33,6 +34,13 @@ type FunctionDefinition struct {
 	Parameters []FunctionParameter
 	Body       BlockStatement
 	Token      lexer.Token
+}
+
+type FunctionPrototype struct {
+	Token      lexer.Token
+	ReturnType TypeName
+	Name       string
+	Parameters []FunctionParameter
 }
 
 type Declaration struct {

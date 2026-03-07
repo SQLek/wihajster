@@ -23,6 +23,15 @@ func (f *Function) AddInstruction(opcode string, operands ...string) string {
 	return temp
 }
 
+// AddVoidInstruction appends a side-effect operation with no destination.
+func (f *Function) AddVoidInstruction(opcode string, operands ...string) {
+	f.Instructions = append(f.Instructions, Instruction{
+		Kind:     InstructionOp,
+		Opcode:   opcode,
+		Operands: append([]string(nil), operands...),
+	})
+}
+
 // AddLabel appends a label instruction.
 func (f *Function) AddLabel(label string) {
 	f.Instructions = append(f.Instructions, Instruction{Kind: InstructionLabel, Label: label})
