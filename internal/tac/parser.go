@@ -16,7 +16,7 @@ var coreOpcodes = map[string]struct{}{
 }
 
 var optionalOpcodes = map[string]struct{}{
-	"alloca": {}, "load": {}, "store": {}, "gep": {},
+	"gep":  {},
 	"zext": {}, "sext": {}, "trunc": {}, "bitcast": {}, "phi": {},
 }
 

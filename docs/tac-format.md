@@ -189,13 +189,18 @@ Any opcode not matched by the grammar above is non-core and must be treated as o
 
 These are valid extension points but not required for M1 parser/sema/TAC milestone:
 
-- Memory ops: `alloca`, `load`, `store`, `gep`.
+- Memory extension beyond current subset: `gep`.
 - Cast/convert ops: `zext`, `sext`, `trunc`, `bitcast`.
 - SSA merge op: `phi`.
 - Backend lowering helpers for M2+ if proven necessary.
 
 If these appear before implementation, emit explicit deterministic errors such as:
 `error: opcode 'phi' is recognized but not enabled in milestone M1`.
+
+## Evaluator v1 notes
+
+For M1 acceptance tests we support an in-process TAC evaluator for the currently emitted subset (`const.*`, arithmetic/comparison, `alloca/load/store`, `call`, `jmp`, `br`, `ret`).
+Evaluator behavior is deterministic and must fail clearly on unsupported opcodes and runtime faults (for example divide-by-zero, invalid labels, uninitialized loads).
 
 ## Determinism requirements
 
@@ -221,3 +226,6 @@ For test stability:
 - **M1 (required):** format parser, verifier basics, core arithmetic/control-flow opcodes, deterministic text emission.
 - **M2 (optional extension):** richer pointer/memory and lowering helpers needed for RV32 backend.
 - **M3 (optional extension):** profile-specific conventions for embedded targets may add metadata fields without breaking v1 core grammar.
+
+
+
