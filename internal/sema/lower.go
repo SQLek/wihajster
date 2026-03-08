@@ -20,7 +20,7 @@ type variableSymbol struct {
 }
 
 type typedValue struct {
-	Value string
+	Value tac.Operand
 	Type  string
 }
 
@@ -115,9 +115,9 @@ func lowerFunction(pfn parser.FunctionDefinition, functions map[string]functionS
 		}
 		fn.Parameters = append(fn.Parameters, tac.Parameter{Name: "%" + param.Name, Type: paramType})
 
-		slot := fn.AddInstruction("alloca", paramType)
-		l.setLocalSlot(param.Name, slot)
-		fn.AddVoidInstruction("store", slot, "%"+param.Name)
+		slot := fn.AddInstruction(tac.OpcodeAlloca, tac.Immediate(paramType))
+		l.setLocalSlot(param.Name, slot.Text)
+		fn.AddVoidInstruction(tac.OpcodeStore, slot, tac.Param("%"+param.Name))
 	}
 
 	reachable, err := l.lowerBlockStatements(pfn.Body.Statements)
@@ -126,7 +126,7 @@ func lowerFunction(pfn parser.FunctionDefinition, functions map[string]functionS
 	}
 	if reachable {
 		if pfn.ReturnType.Specifier == parser.TypeSpecifierVoid {
-			fn.AddRet("")
+			fn.AddRet(tac.Operand{})
 		} else {
 			return tac.Function{}, newError(pfn.Token, "function %s may reach end without return", pfn.Name)
 		}
@@ -268,7 +268,7 @@ func (l *lowerer) lowerStatement(stmt parser.Statement) (bool, error) {
 			if l.returnType != "void" {
 				return false, newError(s.Token, "non-void function must return a value")
 			}
-			l.fn.AddRet("")
+			l.fn.AddRet(tac.Operand{})
 			return false, nil
 		}
 
@@ -303,8 +303,8 @@ func (l *lowerer) lowerLocalDeclaration(decl parser.Declaration) error {
 	if err := l.declareLocal(decl.Token, decl.Name, typ); err != nil {
 		return err
 	}
-	slot := l.fn.AddInstruction("alloca", typ)
-	l.setLocalSlot(decl.Name, slot)
+	slot := l.fn.AddInstruction(tac.OpcodeAlloca, tac.Immediate(typ))
+	l.setLocalSlot(decl.Name, slot.Text)
 	if decl.Initializer == nil {
 		return nil
 	}
@@ -315,7 +315,7 @@ func (l *lowerer) lowerLocalDeclaration(decl parser.Declaration) error {
 	if value.Type != typ {
 		return newError(decl.Token, "initializer type mismatch for %s: expected %s, got %s", decl.Name, typ, value.Type)
 	}
-	l.fn.AddVoidInstruction("store", slot, value.Value)
+	l.fn.AddVoidInstruction(tac.OpcodeStore, slot, value.Value)
 	return nil
 }
 
@@ -464,19 +464,19 @@ func (l *lowerer) lowerExpr(expr parser.Expression) (typedValue, error) {
 		if _, err := strconv.ParseInt(e.Raw, 10, 32); err != nil {
 			return typedValue{}, newError(e.Token, "invalid integer literal %q", e.Raw)
 		}
-		return typedValue{Value: l.fn.AddInstruction("const.i32", e.Raw), Type: "i32"}, nil
+		return typedValue{Value: l.fn.AddInstruction(tac.OpcodeConstI32, tac.Immediate(e.Raw)), Type: "i32"}, nil
 	case parser.CharacterLiteralExpression:
 		value, err := decodeCharacterLiteral(e.Raw)
 		if err != nil {
 			return typedValue{}, newError(e.Token, "%s", err.Error())
 		}
-		return typedValue{Value: l.fn.AddInstruction("const.i32", strconv.FormatInt(int64(value), 10)), Type: "i32"}, nil
+		return typedValue{Value: l.fn.AddInstruction(tac.OpcodeConstI32, tac.Immediate(strconv.FormatInt(int64(value), 10))), Type: "i32"}, nil
 	case parser.IdentifierExpression:
 		sym, ok := l.resolveVariable(e.Name)
 		if !ok {
 			return typedValue{}, newError(e.Token, "use of undeclared identifier %s", e.Name)
 		}
-		return typedValue{Value: l.fn.AddInstruction("load", sym.Slot), Type: sym.Type}, nil
+		return typedValue{Value: l.fn.AddInstruction(tac.OpcodeLoad, tac.StackSlotPointer(sym.Slot)), Type: sym.Type}, nil
 	case parser.UnaryExpression:
 		operand, err := l.lowerExpr(e.Operand)
 		if err != nil {
@@ -489,11 +489,11 @@ func (l *lowerer) lowerExpr(expr parser.Expression) (typedValue, error) {
 		case lexer.TokenPlus:
 			return operand, nil
 		case lexer.TokenMinus:
-			return typedValue{Value: l.fn.AddInstruction("neg", operand.Value), Type: operand.Type}, nil
+			return typedValue{Value: l.fn.AddInstruction(tac.OpcodeNeg, operand.Value), Type: operand.Type}, nil
 		case lexer.TokenBang:
-			return typedValue{Value: l.fn.AddInstruction("logic_not", operand.Value), Type: "i32"}, nil
+			return typedValue{Value: l.fn.AddInstruction(tac.OpcodeLogicNot, operand.Value), Type: "i32"}, nil
 		case lexer.TokenTilde:
-			return typedValue{Value: l.fn.AddInstruction("not", operand.Value), Type: operand.Type}, nil
+			return typedValue{Value: l.fn.AddInstruction(tac.OpcodeNot, operand.Value), Type: operand.Type}, nil
 		default:
 			return typedValue{}, unsupportedError(e.Token, "unary operator")
 		}
@@ -510,12 +510,12 @@ func (l *lowerer) lowerExpr(expr parser.Expression) (typedValue, error) {
 			return typedValue{}, newError(e.Token, "binary operator requires non-void operands")
 		}
 		opcode := binaryOpcode(e.Op)
-		if opcode == "" {
+		if opcode == tac.OpcodeInvalid {
 			return typedValue{}, unsupportedError(e.Token, "binary operator")
 		}
 		if e.Op == lexer.TokenAndAnd || e.Op == lexer.TokenOrOr {
-			lhsVal := l.fn.AddInstruction("ne", lhs.Value, "0")
-			rhsVal := l.fn.AddInstruction("ne", rhs.Value, "0")
+			lhsVal := l.fn.AddInstruction(tac.OpcodeNe, lhs.Value, tac.Immediate("0"))
+			rhsVal := l.fn.AddInstruction(tac.OpcodeNe, rhs.Value, tac.Immediate("0"))
 			return typedValue{Value: l.fn.AddInstruction(opcode, lhsVal, rhsVal), Type: "i32"}, nil
 		}
 
@@ -541,7 +541,7 @@ func (l *lowerer) lowerExpr(expr parser.Expression) (typedValue, error) {
 		if rhs.Type != sym.Type {
 			return typedValue{}, newError(e.Token, "assignment type mismatch: expected %s, got %s", sym.Type, rhs.Type)
 		}
-		l.fn.AddVoidInstruction("store", sym.Slot, rhs.Value)
+		l.fn.AddVoidInstruction(tac.OpcodeStore, tac.StackSlotPointer(sym.Slot), rhs.Value)
 		return rhs, nil
 	case parser.CallExpression:
 		callee, ok := e.Callee.(parser.IdentifierExpression)
@@ -555,7 +555,7 @@ func (l *lowerer) lowerExpr(expr parser.Expression) (typedValue, error) {
 		if len(e.Args) != len(sig.Params) {
 			return typedValue{}, newError(e.Token, "function %s expects %d arguments, got %d", callee.Name, len(sig.Params), len(e.Args))
 		}
-		args := make([]string, 0, len(e.Args))
+		args := make([]tac.Operand, 0, len(e.Args))
 		for i, argExpr := range e.Args {
 			arg, err := l.lowerExpr(argExpr)
 			if err != nil {
@@ -569,10 +569,10 @@ func (l *lowerer) lowerExpr(expr parser.Expression) (typedValue, error) {
 		}
 		calleeName := "@" + callee.Name
 		if sig.ReturnType == "void" {
-			l.fn.AddCallVoid(calleeName, args...)
+			l.fn.AddCallVoid(tac.FunctionSymbol(calleeName), args...)
 			return typedValue{Type: "void"}, nil
 		}
-		return typedValue{Value: l.fn.AddCall(calleeName, args...), Type: sig.ReturnType}, nil
+		return typedValue{Value: l.fn.AddCall(tac.FunctionSymbol(calleeName), args...), Type: sig.ReturnType}, nil
 	default:
 		return typedValue{}, unsupportedError(lexer.Token{}, "expression kind")
 	}
@@ -613,46 +613,46 @@ func decodeCharacterLiteral(raw string) (int32, error) {
 	}
 }
 
-func binaryOpcode(op lexer.TokenType) string {
+func binaryOpcode(op lexer.TokenType) tac.Opcode {
 	switch op {
 	case lexer.TokenPlus:
-		return "add"
+		return tac.OpcodeAdd
 	case lexer.TokenMinus:
-		return "sub"
+		return tac.OpcodeSub
 	case lexer.TokenStar:
-		return "mul"
+		return tac.OpcodeMul
 	case lexer.TokenSlash:
-		return "div_s"
+		return tac.OpcodeDivS
 	case lexer.TokenPercent:
-		return "mod_s"
+		return tac.OpcodeModS
 	case lexer.TokenAmp:
-		return "and"
+		return tac.OpcodeAnd
 	case lexer.TokenPipe:
-		return "or"
+		return tac.OpcodeOr
 	case lexer.TokenCaret:
-		return "xor"
+		return tac.OpcodeXor
 	case lexer.TokenShiftLeft:
-		return "shl"
+		return tac.OpcodeShl
 	case lexer.TokenShiftRight:
-		return "shr_s"
+		return tac.OpcodeShrS
 	case lexer.TokenEq:
-		return "eq"
+		return tac.OpcodeEq
 	case lexer.TokenNe:
-		return "ne"
+		return tac.OpcodeNe
 	case lexer.TokenLt:
-		return "lt_s"
+		return tac.OpcodeLtS
 	case lexer.TokenLe:
-		return "le_s"
+		return tac.OpcodeLeS
 	case lexer.TokenGt:
-		return "gt_s"
+		return tac.OpcodeGtS
 	case lexer.TokenGe:
-		return "ge_s"
+		return tac.OpcodeGeS
 	case lexer.TokenAndAnd:
-		return "and"
+		return tac.OpcodeAnd
 	case lexer.TokenOrOr:
-		return "or"
+		return tac.OpcodeOr
 	default:
-		return ""
+		return tac.OpcodeInvalid
 	}
 }
 
