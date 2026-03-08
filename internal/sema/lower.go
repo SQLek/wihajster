@@ -3,6 +3,7 @@ package sema
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/SQLek/wihajster/internal/lexer"
 	"github.com/SQLek/wihajster/internal/parser"
@@ -170,19 +171,21 @@ func sameSignature(a, b functionSignature) bool {
 }
 
 func lowerType(t parser.TypeName) string {
-	if t.PointerDepth > 0 {
-		return "ptr"
-	}
+	base := ""
 	switch t.Specifier {
 	case parser.TypeSpecifierInt:
-		return "i32"
+		base = "i32"
 	case parser.TypeSpecifierChar:
-		return "i32"
+		base = "i32"
 	case parser.TypeSpecifierVoid:
-		return "void"
+		base = "void"
 	default:
 		return ""
 	}
+	for i := 0; i < t.PointerDepth; i++ {
+		base += "*"
+	}
+	return base
 }
 
 func lowerObjectType(tok lexer.Token, t parser.TypeName) (string, error) {
@@ -478,12 +481,37 @@ func (l *lowerer) lowerExpr(expr parser.Expression) (typedValue, error) {
 		}
 		return typedValue{Value: l.fn.AddInstruction(tac.OpcodeLoad, tac.StackSlotPointer(sym.Slot)), Type: sym.Type}, nil
 	case parser.UnaryExpression:
+		switch e.Op {
+		case lexer.TokenStar:
+			ptr, err := l.lowerExpr(e.Operand)
+			if err != nil {
+				return typedValue{}, err
+			}
+			elemType, ok := pointeeType(ptr.Type)
+			if !ok {
+				return typedValue{}, newError(e.Token, "cannot dereference non-pointer type %s", ptr.Type)
+			}
+			if elemType == "void" {
+				return typedValue{}, newError(e.Token, "cannot dereference void* without cast")
+			}
+			return typedValue{Value: l.loadAddress(ptr.Value), Type: elemType}, nil
+		case lexer.TokenAmp:
+			addr, elemType, err := l.lowerAddress(e.Operand)
+			if err != nil {
+				return typedValue{}, err
+			}
+			return typedValue{Value: addr, Type: pointerTo(elemType)}, nil
+		}
+
 		operand, err := l.lowerExpr(e.Operand)
 		if err != nil {
 			return typedValue{}, err
 		}
 		if operand.Type == "void" {
 			return typedValue{}, newError(e.Token, "unary operator requires non-void operand")
+		}
+		if isPointerType(operand.Type) {
+			return typedValue{}, newError(e.Token, "unary operator %v does not accept pointer operand", e.Op)
 		}
 		switch e.Op {
 		case lexer.TokenPlus:
@@ -526,22 +554,18 @@ func (l *lowerer) lowerExpr(expr parser.Expression) (typedValue, error) {
 		}
 		return typedValue{Value: l.fn.AddInstruction(opcode, lhs.Value, rhs.Value), Type: resultType}, nil
 	case parser.AssignmentExpression:
-		ident, ok := e.LHS.(parser.IdentifierExpression)
-		if !ok {
-			return typedValue{}, unsupportedError(e.Token, "assignment target")
-		}
-		sym, ok := l.resolveVariable(ident.Name)
-		if !ok {
-			return typedValue{}, newError(e.Token, "use of undeclared identifier %s", ident.Name)
+		addr, lhsType, err := l.lowerAddress(e.LHS)
+		if err != nil {
+			return typedValue{}, err
 		}
 		rhs, err := l.lowerExpr(e.RHS)
 		if err != nil {
 			return typedValue{}, err
 		}
-		if rhs.Type != sym.Type {
-			return typedValue{}, newError(e.Token, "assignment type mismatch: expected %s, got %s", sym.Type, rhs.Type)
+		if rhs.Type != lhsType {
+			return typedValue{}, newError(e.Token, "assignment type mismatch: expected %s, got %s", lhsType, rhs.Type)
 		}
-		l.fn.AddVoidInstruction(tac.OpcodeStore, tac.StackSlotPointer(sym.Slot), rhs.Value)
+		l.storeAddress(addr, rhs.Value)
 		return rhs, nil
 	case parser.CallExpression:
 		callee, ok := e.Callee.(parser.IdentifierExpression)
@@ -576,6 +600,64 @@ func (l *lowerer) lowerExpr(expr parser.Expression) (typedValue, error) {
 	default:
 		return typedValue{}, unsupportedError(lexer.Token{}, "expression kind")
 	}
+}
+
+func (l *lowerer) lowerAddress(expr parser.Expression) (tac.Operand, string, error) {
+	switch e := expr.(type) {
+	case parser.IdentifierExpression:
+		sym, ok := l.resolveVariable(e.Name)
+		if !ok {
+			return tac.Operand{}, "", newError(e.Token, "use of undeclared identifier %s", e.Name)
+		}
+		return tac.StackSlotPointer(sym.Slot), sym.Type, nil
+	case parser.UnaryExpression:
+		if e.Op != lexer.TokenStar {
+			break
+		}
+		ptr, err := l.lowerExpr(e.Operand)
+		if err != nil {
+			return tac.Operand{}, "", err
+		}
+		elemType, ok := pointeeType(ptr.Type)
+		if !ok {
+			return tac.Operand{}, "", newError(e.Token, "cannot dereference non-pointer type %s", ptr.Type)
+		}
+		if elemType == "void" {
+			return tac.Operand{}, "", newError(e.Token, "cannot dereference void* without cast")
+		}
+		return ptr.Value, elemType, nil
+	}
+	return tac.Operand{}, "", unsupportedError(lexer.Token{}, "assignment target")
+}
+
+func isPointerType(typ string) bool {
+	return strings.HasSuffix(typ, "*")
+}
+
+func pointeeType(typ string) (string, bool) {
+	if !isPointerType(typ) {
+		return "", false
+	}
+	return typ[:len(typ)-1], true
+}
+
+func pointerTo(typ string) string {
+	return typ + "*"
+}
+
+func (l *lowerer) loadAddress(addr tac.Operand) tac.Operand {
+	if addr.Kind == tac.OperandStackSlotPointer {
+		return l.fn.AddInstruction(tac.OpcodeLoad, addr)
+	}
+	return l.fn.AddInstruction(tac.OpcodeLoadIndirect, addr)
+}
+
+func (l *lowerer) storeAddress(addr, value tac.Operand) {
+	if addr.Kind == tac.OperandStackSlotPointer {
+		l.fn.AddVoidInstruction(tac.OpcodeStore, addr, value)
+		return
+	}
+	l.fn.AddVoidInstruction(tac.OpcodeStoreIndirect, addr, value)
 }
 
 func decodeCharacterLiteral(raw string) (int32, error) {

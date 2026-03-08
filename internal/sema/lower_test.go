@@ -205,7 +205,7 @@ int main() {
 `
 
 	err := lowerErr(t, src)
-	if !strings.Contains(err.Error(), "argument 1 to f has type i32, expected ptr") {
+	if !strings.Contains(err.Error(), "argument 1 to f has type i32, expected i32*") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -264,13 +264,85 @@ int main() {
 	int c = '\'';
 	return a + b + c;
 }
-`
+	`
 
 	text := lowerText(t, src)
 	for _, want := range []string{"const.i32 97", "const.i32 10", "const.i32 39"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected TAC to contain %q, got:\n%s", want, text)
 		}
+	}
+}
+
+func TestLower_LowersAddressOfAndDeref(t *testing.T) {
+	src := `
+int main() {
+	int x = 7;
+	int *p = &x;
+	return *p;
+}
+`
+
+	text := lowerText(t, src)
+	for _, want := range []string{"alloca i32*", "store %s", " = load %s", "ret "} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected TAC to contain %q, got:\n%s", want, text)
+		}
+	}
+}
+
+func TestLower_LowersStoreThroughDeref(t *testing.T) {
+	src := `
+int main() {
+	int x = 1;
+	int *p = &x;
+	*p = 9;
+	return x;
+}
+`
+
+	_ = lowerOK(t, src)
+}
+
+func TestLower_RejectsDerefOfNonPointer(t *testing.T) {
+	src := `
+int main() {
+	int x = 1;
+	return *x;
+}
+`
+
+	err := lowerErr(t, src)
+	if !strings.Contains(err.Error(), "cannot dereference non-pointer type i32") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLower_RejectsUnaryArithmeticOnPointer(t *testing.T) {
+	src := `
+int main() {
+	int x = 1;
+	int *p = &x;
+	return -p;
+}
+`
+
+	err := lowerErr(t, src)
+	if !strings.Contains(err.Error(), "does not accept pointer operand") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLower_RejectsDerefVoidPointer(t *testing.T) {
+	src := `
+int main(void *p) {
+	return *p;
+}
+`
+
+	err := lowerErr(t, src)
+	if !strings.Contains(err.Error(), "cannot dereference void* without cast") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

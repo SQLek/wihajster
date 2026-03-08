@@ -61,6 +61,8 @@ const (
 	OpcodeAlloca
 	OpcodeLoad
 	OpcodeStore
+	OpcodeLoadIndirect
+	OpcodeStoreIndirect
 )
 
 var opcodeNames = map[Opcode]string{
@@ -68,7 +70,7 @@ var opcodeNames = map[Opcode]string{
 	OpcodeAdd: "add", OpcodeSub: "sub", OpcodeMul: "mul", OpcodeDivS: "div_s", OpcodeModS: "mod_s",
 	OpcodeAnd: "and", OpcodeOr: "or", OpcodeXor: "xor", OpcodeShl: "shl", OpcodeShrS: "shr_s",
 	OpcodeEq: "eq", OpcodeNe: "ne", OpcodeLtS: "lt_s", OpcodeLeS: "le_s", OpcodeGtS: "gt_s", OpcodeGeS: "ge_s",
-	OpcodeNeg: "neg", OpcodeNot: "not", OpcodeLogicNot: "logic_not", OpcodeCall: "call", OpcodeAlloca: "alloca", OpcodeLoad: "load", OpcodeStore: "store",
+	OpcodeNeg: "neg", OpcodeNot: "not", OpcodeLogicNot: "logic_not", OpcodeCall: "call", OpcodeAlloca: "alloca", OpcodeLoad: "load", OpcodeStore: "store", OpcodeLoadIndirect: "load.ind", OpcodeStoreIndirect: "store.ind",
 }
 
 var coreOpcodeByName = map[string]Opcode{}
@@ -193,7 +195,9 @@ func verifyOpcodeOperands(inst Instruction) error {
 		}
 		return nil
 	}
-	valueKind := func(k OperandKind) bool { return k == OperandTemp || k == OperandParam || k == OperandImmediate }
+	valueKind := func(k OperandKind) bool {
+		return k == OperandTemp || k == OperandParam || k == OperandImmediate || k == OperandStackSlotPointer
+	}
 
 	switch inst.Opcode {
 	case OpcodeConstI32, OpcodeConstI8:
@@ -219,6 +223,14 @@ func verifyOpcodeOperands(inst Instruction) error {
 	case OpcodeStore:
 		if len(inst.Operands) != 2 || inst.Operands[0].Kind != OperandStackSlotPointer || !valueKind(inst.Operands[1].Kind) {
 			return fmt.Errorf("opcode store expects stack slot pointer and value operands")
+		}
+	case OpcodeLoadIndirect:
+		if len(inst.Operands) != 1 || !valueKind(inst.Operands[0].Kind) {
+			return fmt.Errorf("opcode load.ind expects one value pointer operand")
+		}
+	case OpcodeStoreIndirect:
+		if len(inst.Operands) != 2 || !valueKind(inst.Operands[0].Kind) || !valueKind(inst.Operands[1].Kind) {
+			return fmt.Errorf("opcode store.ind expects value pointer and value operands")
 		}
 	case OpcodeCall:
 		if inst.CallCallee == "" {
