@@ -68,12 +68,10 @@ func formatInstruction(inst Instruction) (string, error) {
 		return "ret " + inst.ReturnValue.Text, nil
 	case InstructionOp:
 		line := inst.Opcode.String()
-		if len(inst.Operands) > 0 {
-			if inst.Opcode == OpcodeCall {
-				line += " " + formatCallInstructionOperands(inst.Operands)
-			} else {
-				line += " " + formatOperands(inst.Operands)
-			}
+		if inst.Opcode == OpcodeCall {
+			line += " " + formatCallInstructionOperands(inst)
+		} else if len(inst.Operands) > 0 {
+			line += " " + formatOperands(inst.Operands)
 		}
 		if inst.HasDestination {
 			line = fmt.Sprintf("%s = %s", inst.Destination.Text, line)
@@ -84,13 +82,13 @@ func formatInstruction(inst Instruction) (string, error) {
 	}
 }
 
-func formatCallInstructionOperands(ops []Operand) string {
-	callee := ops[0].Text
-	if len(ops) == 1 {
+func formatCallInstructionOperands(inst Instruction) string {
+	callee := inst.CallCallee
+	if len(inst.CallArgs) == 0 {
 		return callee + "()"
 	}
-	args := make([]string, 0, len(ops)-1)
-	for _, op := range ops[1:] {
+	args := make([]string, 0, len(inst.CallArgs))
+	for _, op := range inst.CallArgs {
 		args = append(args, op.Text)
 	}
 	return callee + "(" + strings.Join(args, ", ") + ")"

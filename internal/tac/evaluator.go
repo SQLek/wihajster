@@ -248,19 +248,18 @@ func (s *evalState) evalOp(frame *evalFrame, inst Instruction, depth int) (runti
 		frame.memory[ptr] = memoryCell{value: val, initialized: true}
 		return runtimeValue{}, false, nil
 	case OpcodeCall:
-		if len(ops) == 0 {
-			return runtimeValue{}, false, fmt.Errorf("opcode call expects at least one operand")
+		if inst.CallCallee == "" {
+			return runtimeValue{}, false, fmt.Errorf("opcode call requires call callee")
 		}
-		callee := ops[0].Text
-		argv := make([]runtimeValue, 0, len(ops)-1)
-		for _, a := range ops[1:] {
+		argv := make([]runtimeValue, 0, len(inst.CallArgs))
+		for _, a := range inst.CallArgs {
 			v, err := frame.resolveValue(a.Text)
 			if err != nil {
 				return runtimeValue{}, false, err
 			}
 			argv = append(argv, v)
 		}
-		ret, err := s.evalCall(callee, argv, depth+1)
+		ret, err := s.evalCall(inst.CallCallee, argv, depth+1)
 		if err != nil {
 			return runtimeValue{}, false, err
 		}

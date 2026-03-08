@@ -13,7 +13,7 @@ func TestVerifyInstruction_InvalidOperandKinds(t *testing.T) {
 	}{
 		{"load with immediate", Instruction{Kind: InstructionOp, Opcode: OpcodeLoad, HasDestination: true, Destination: Temp("%t0"), Operands: []Operand{Immediate("1")}}, "stack slot pointer"},
 		{"store with bad pointer", Instruction{Kind: InstructionOp, Opcode: OpcodeStore, Operands: []Operand{Temp("%t0"), Immediate("1")}}, "stack slot pointer"},
-		{"call with non symbol callee", Instruction{Kind: InstructionOp, Opcode: OpcodeCall, HasDestination: true, Destination: Temp("%t0"), Operands: []Operand{Immediate("1")}}, "function symbol"},
+		{"call with non symbol callee", Instruction{Kind: InstructionOp, Opcode: OpcodeCall, HasDestination: true, Destination: Temp("%t0"), CallCallee: "1"}, "function symbol"},
 		{"jmp with non-label", Instruction{Kind: InstructionJmp, TrueLabel: Immediate("1")}, "label operand"},
 	}
 	for _, tc := range tests {

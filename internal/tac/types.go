@@ -115,6 +115,8 @@ type Operand struct {
 	Text string
 }
 
+type ValueRef = Operand
+
 func (o Operand) String() string { return o.Text }
 
 func Temp(name string) Operand             { return Operand{Kind: OperandTemp, Text: name} }
@@ -133,6 +135,8 @@ type Instruction struct {
 	Destination    Operand
 	Opcode         Opcode
 	Operands       []Operand
+	CallCallee     string
+	CallArgs       []ValueRef
 
 	Condition  Operand
 	TrueLabel  Operand
@@ -217,13 +221,19 @@ func verifyOpcodeOperands(inst Instruction) error {
 			return fmt.Errorf("opcode store expects stack slot pointer and value operands")
 		}
 	case OpcodeCall:
-		if len(inst.Operands) == 0 || inst.Operands[0].Kind != OperandFunctionSymbol {
-			return fmt.Errorf("opcode call first operand must be function symbol")
+		if inst.CallCallee == "" {
+			return fmt.Errorf("opcode call requires call callee")
 		}
-		for i := 1; i < len(inst.Operands); i++ {
-			if !valueKind(inst.Operands[i].Kind) {
-				return fmt.Errorf("opcode call argument %d must be value operand", i)
+		if !isFunctionSymbol(inst.CallCallee) {
+			return fmt.Errorf("opcode call callee must be function symbol")
+		}
+		for i := range inst.CallArgs {
+			if !valueKind(inst.CallArgs[i].Kind) {
+				return fmt.Errorf("opcode call argument %d must be value operand", i+1)
 			}
+		}
+		if len(inst.Operands) != 0 {
+			return fmt.Errorf("opcode call uses dedicated call fields, not generic operands")
 		}
 	default:
 		return fmt.Errorf("unsupported opcode %s", inst.Opcode)
@@ -232,6 +242,10 @@ func verifyOpcodeOperands(inst Instruction) error {
 		return fmt.Errorf("destination must be temp or stack slot pointer")
 	}
 	return nil
+}
+
+func isFunctionSymbol(name string) bool {
+	return len(name) > 1 && name[0] == '@'
 }
 
 func operandKindName(k OperandKind) string {
