@@ -95,3 +95,23 @@ func (f *Function) AddRet(value Operand) {
 	}
 	f.Instructions = append(f.Instructions, inst)
 }
+
+// SetBlock appends a label as the current block marker.
+func (f *Function) SetBlock(label string) error {
+	f.AddLabel(label)
+	return ValidateFunctionIR(*f)
+}
+
+// AddBlock appends a labeled block.
+func (f *Function) AddBlock(label string) error {
+	return f.SetBlock(label)
+}
+
+// AddFunction validates and appends a function to a module.
+func (m *Module) AddFunction(fn Function) error {
+	if err := ValidateFunctionIR(fn); err != nil {
+		return err
+	}
+	m.Functions = append(m.Functions, fn)
+	return nil
+}

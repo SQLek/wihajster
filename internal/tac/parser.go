@@ -58,7 +58,9 @@ func (p *parser) parse() (Module, error) {
 			return Module{}, p.errf("function %q defined multiple times", fn.Name)
 		}
 		funcNames[fn.Name] = struct{}{}
-		mod.Functions = append(mod.Functions, fn)
+		if err := mod.AddFunction(fn); err != nil {
+			return Module{}, p.errf("%v", err)
+		}
 	}
 
 	if !headerSeen {
@@ -126,6 +128,9 @@ func (p *parser) parseFunction(header string) (Function, error) {
 		if _, exists := definedLabels[label]; !exists {
 			return Function{}, p.errf("label %q is referenced but not defined", label)
 		}
+	}
+	if err := ValidateFunctionIR(fn); err != nil {
+		return Function{}, p.errf("%v", err)
 	}
 
 	return fn, nil

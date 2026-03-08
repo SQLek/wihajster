@@ -198,7 +198,7 @@ func @f() -> i32 {
 }
 `,
 			fn:  "@f",
-			msg: "ended without ret",
+			msg: "has no terminator and no fallthrough successor",
 		},
 	}
 
@@ -219,5 +219,21 @@ func @f() -> i32 {
 				t.Fatalf("expected error containing %q, got %v", tc.msg, err)
 			}
 		})
+	}
+}
+
+func TestEvaluateFunction_ValidatesFunctionIR(t *testing.T) {
+	mod := Module{Functions: []Function{{
+		Name:       "@bad",
+		ReturnType: "i32",
+		Instructions: []Instruction{
+			{Kind: InstructionLabel, Label: ".L0"},
+			{Kind: InstructionJmp, TrueLabel: Label(".Lmissing")},
+		},
+	}}}
+
+	_, err := EvaluateFunction(mod, "@bad", nil, EvalOptions{})
+	if err == nil || !strings.Contains(err.Error(), "undefined label") {
+		t.Fatalf("expected undefined label error, got %v", err)
 	}
 }

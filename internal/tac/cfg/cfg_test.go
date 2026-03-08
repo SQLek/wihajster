@@ -58,7 +58,7 @@ func TestBuildCFGRejectsUndefinedTarget(t *testing.T) {
 	fn := tac.Function{
 		Name: "@f",
 		Instructions: []tac.Instruction{
-			{Kind: tac.InstructionJmp, Label: ".Lmissing"},
+			{Kind: tac.InstructionJmp, TrueLabel: tac.Label(".Lmissing")},
 			{Kind: tac.InstructionRet},
 		},
 	}
@@ -74,12 +74,12 @@ func TestBuildCFGRejectsMidBlockTerminator(t *testing.T) {
 		Name: "@f",
 		Instructions: []tac.Instruction{
 			{Kind: tac.InstructionRet},
-			{Kind: tac.InstructionOp, Opcode: "const.i32", Destination: "%v", Operands: []string{"1"}},
+			{Kind: tac.InstructionOp, Opcode: tac.OpcodeConstI32, HasDestination: true, Destination: tac.Temp("%v"), Operands: []tac.Operand{tac.Immediate("1")}},
 		},
 	}
 
 	_, err := Build(fn)
-	if err == nil || !strings.Contains(err.Error(), "terminator must be last") {
+	if err == nil || !strings.Contains(err.Error(), "has no terminator and no fallthrough successor") {
 		t.Fatalf("expected terminator placement error, got %v", err)
 	}
 }
