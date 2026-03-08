@@ -49,8 +49,14 @@ func TestFunction_AddCall_FormatsOperandDeterministically(t *testing.T) {
 	if inst.Opcode != OpcodeCall {
 		t.Fatalf("expected call opcode, got %s", inst.Opcode)
 	}
-	if len(inst.Operands) != 3 || inst.Operands[0].Text != "@sum" {
-		t.Fatalf("unexpected call operands: %#v", inst.Operands)
+	if inst.CallCallee != "@sum" {
+		t.Fatalf("unexpected call callee: %q", inst.CallCallee)
+	}
+	if len(inst.CallArgs) != 2 || inst.CallArgs[0].Text != "%a" || inst.CallArgs[1].Text != "%b" {
+		t.Fatalf("unexpected call args: %#v", inst.CallArgs)
+	}
+	if len(inst.Operands) != 0 {
+		t.Fatalf("expected generic operands to be empty for call, got %#v", inst.Operands)
 	}
 }
 

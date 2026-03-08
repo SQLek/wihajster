@@ -280,6 +280,15 @@ func parseInstruction(line string) (Instruction, error) {
 	inst.Opcode = opcode
 
 	rest := strings.TrimSpace(strings.TrimPrefix(right, tokens[0]))
+	if opcode == OpcodeCall {
+		callee, args, err := parseCallOperands(rest)
+		if err != nil {
+			return Instruction{}, err
+		}
+		inst.CallCallee = callee
+		inst.CallArgs = args
+		return inst, nil
+	}
 	if rest != "" {
 		ops, err := parseOpcodeOperands(opcode, rest)
 		if err != nil {
@@ -291,21 +300,6 @@ func parseInstruction(line string) (Instruction, error) {
 }
 
 func parseOpcodeOperands(opcode Opcode, raw string) ([]Operand, error) {
-	if opcode == OpcodeCall {
-		callee, args, err := parseCallText(raw)
-		if err != nil {
-			return nil, err
-		}
-		out := []Operand{FunctionSymbol(callee)}
-		for _, arg := range args {
-			a, err := parseValueOperand(arg)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, a)
-		}
-		return out, nil
-	}
 	parts := splitCommaSeparated(raw)
 	out := make([]Operand, 0, len(parts))
 	for _, p := range parts {
@@ -331,11 +325,14 @@ func parseOpcodeOperands(opcode Opcode, raw string) ([]Operand, error) {
 	return out, nil
 }
 
-func parseCallText(raw string) (string, []string, error) {
+func parseCallOperands(raw string) (string, []ValueRef, error) {
 	raw = strings.TrimSpace(raw)
 	open := strings.Index(raw, "(")
 	close := strings.LastIndex(raw, ")")
 	if open <= 0 || close < open {
+		return "", nil, fmt.Errorf("malformed call operand %q", raw)
+	}
+	if strings.TrimSpace(raw[close+1:]) != "" {
 		return "", nil, fmt.Errorf("malformed call operand %q", raw)
 	}
 	callee := strings.TrimSpace(raw[:open])
@@ -346,7 +343,16 @@ func parseCallText(raw string) (string, []string, error) {
 	if argsRaw == "" {
 		return callee, nil, nil
 	}
-	return callee, splitCommaSeparated(argsRaw), nil
+	argTexts := splitCommaSeparated(argsRaw)
+	args := make([]ValueRef, 0, len(argTexts))
+	for _, arg := range argTexts {
+		a, err := parseValueOperand(arg)
+		if err != nil {
+			return "", nil, err
+		}
+		args = append(args, a)
+	}
+	return callee, args, nil
 }
 
 func parseValueOperand(raw string) (Operand, error) {

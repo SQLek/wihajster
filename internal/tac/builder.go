@@ -44,14 +44,26 @@ func (f *Function) AddVoidInstruction(opcode Opcode, operands ...Operand) {
 
 // AddCall emits a value-producing function call.
 func (f *Function) AddCall(callee Operand, args ...Operand) Operand {
-	ops := append([]Operand{callee}, args...)
-	return f.AddInstruction(OpcodeCall, ops...)
+	dst := f.NewTemp()
+	f.Instructions = append(f.Instructions, Instruction{
+		Kind:           InstructionOp,
+		HasDestination: true,
+		Destination:    dst,
+		Opcode:         OpcodeCall,
+		CallCallee:     callee.Text,
+		CallArgs:       append([]ValueRef(nil), args...),
+	})
+	return dst
 }
 
 // AddCallVoid emits a call with ignored return value.
 func (f *Function) AddCallVoid(callee Operand, args ...Operand) {
-	ops := append([]Operand{callee}, args...)
-	f.AddVoidInstruction(OpcodeCall, ops...)
+	f.Instructions = append(f.Instructions, Instruction{
+		Kind:       InstructionOp,
+		Opcode:     OpcodeCall,
+		CallCallee: callee.Text,
+		CallArgs:   append([]ValueRef(nil), args...),
+	})
 }
 
 // AddLabel appends a label instruction.
