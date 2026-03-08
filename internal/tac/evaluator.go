@@ -233,7 +233,34 @@ func (s *evalState) evalOp(frame *evalFrame, inst Instruction, depth int) (runti
 			return runtimeValue{}, false, fmt.Errorf("load from uninitialized memory at %d", ptr)
 		}
 		return cell.value, true, nil
+	case OpcodeLoadIndirect:
+		if err := needCount(1); err != nil {
+			return runtimeValue{}, false, err
+		}
+		ptr, err := frame.resolvePtr(ops[0].Text)
+		if err != nil {
+			return runtimeValue{}, false, err
+		}
+		cell, ok := frame.memory[ptr]
+		if !ok || !cell.initialized {
+			return runtimeValue{}, false, fmt.Errorf("load from uninitialized memory at %d", ptr)
+		}
+		return cell.value, true, nil
 	case OpcodeStore:
+		if err := needCount(2); err != nil {
+			return runtimeValue{}, false, err
+		}
+		ptr, err := frame.resolvePtr(ops[0].Text)
+		if err != nil {
+			return runtimeValue{}, false, err
+		}
+		val, err := frame.resolveValue(ops[1].Text)
+		if err != nil {
+			return runtimeValue{}, false, err
+		}
+		frame.memory[ptr] = memoryCell{value: val, initialized: true}
+		return runtimeValue{}, false, nil
+	case OpcodeStoreIndirect:
 		if err := needCount(2); err != nil {
 			return runtimeValue{}, false, err
 		}
