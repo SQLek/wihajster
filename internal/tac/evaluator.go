@@ -60,6 +60,9 @@ func EvaluateFunction(mod Module, functionName string, args []int32, opts EvalOp
 
 	funcs := make(map[string]Function, len(mod.Functions))
 	for _, fn := range mod.Functions {
+		if err := ValidateFunctionIR(fn); err != nil {
+			return 0, err
+		}
 		funcs[fn.Name] = fn
 	}
 

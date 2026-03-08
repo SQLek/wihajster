@@ -31,3 +31,15 @@ func @main() -> i32 {
 		t.Fatalf("expected 3 cfg blocks, got %d", len(view.Blocks))
 	}
 }
+
+func TestBuildFunctionView_ValidatesIR(t *testing.T) {
+	fn := tac.Function{Name: "@bad", ReturnType: "i32", Instructions: []tac.Instruction{
+		{Kind: tac.InstructionLabel, Label: ".L0"},
+		{Kind: tac.InstructionJmp, TrueLabel: tac.Label(".Lmissing")},
+	}}
+
+	_, err := BuildFunctionView(fn)
+	if err == nil || !strings.Contains(err.Error(), "undefined label") {
+		t.Fatalf("expected undefined label error, got %v", err)
+	}
+}

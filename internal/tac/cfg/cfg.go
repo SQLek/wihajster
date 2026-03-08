@@ -21,6 +21,9 @@ type BasicBlock struct {
 }
 
 func Build(fn tac.Function) (Graph, error) {
+	if err := tac.ValidateFunctionIR(fn); err != nil {
+		return Graph{}, err
+	}
 	if len(fn.Instructions) == 0 {
 		return Graph{Function: fn}, nil
 	}
@@ -40,20 +43,20 @@ func Build(fn tac.Function) (Graph, error) {
 	for i, inst := range fn.Instructions {
 		switch inst.Kind {
 		case tac.InstructionJmp:
-			target, ok := labelDefs[inst.Label]
+			target, ok := labelDefs[inst.TrueLabel.Text]
 			if !ok {
-				return Graph{}, fmt.Errorf("function %s: jump to undefined label %q", fn.Name, inst.Label)
+				return Graph{}, fmt.Errorf("function %s: jump to undefined label %q", fn.Name, inst.TrueLabel)
 			}
 			leaders[target] = struct{}{}
 			if i+1 < len(fn.Instructions) {
 				leaders[i+1] = struct{}{}
 			}
 		case tac.InstructionBr:
-			trueTarget, ok := labelDefs[inst.TrueLabel]
+			trueTarget, ok := labelDefs[inst.TrueLabel.Text]
 			if !ok {
 				return Graph{}, fmt.Errorf("function %s: branch to undefined label %q", fn.Name, inst.TrueLabel)
 			}
-			falseTarget, ok := labelDefs[inst.FalseLabel]
+			falseTarget, ok := labelDefs[inst.FalseLabel.Text]
 			if !ok {
 				return Graph{}, fmt.Errorf("function %s: branch to undefined label %q", fn.Name, inst.FalseLabel)
 			}
@@ -94,12 +97,12 @@ func Build(fn tac.Function) (Graph, error) {
 		last := blocks[i].Instructions[len(blocks[i].Instructions)-1]
 		switch last.Kind {
 		case tac.InstructionJmp:
-			targetStart := labelDefs[last.Label]
+			targetStart := labelDefs[last.TrueLabel.Text]
 			targetID := startToBlock[targetStart]
 			blocks[i].Successors = append(blocks[i].Successors, targetID)
 		case tac.InstructionBr:
-			trueID := startToBlock[labelDefs[last.TrueLabel]]
-			falseID := startToBlock[labelDefs[last.FalseLabel]]
+			trueID := startToBlock[labelDefs[last.TrueLabel.Text]]
+			falseID := startToBlock[labelDefs[last.FalseLabel.Text]]
 			blocks[i].Successors = append(blocks[i].Successors, trueID)
 			if falseID != trueID {
 				blocks[i].Successors = append(blocks[i].Successors, falseID)
