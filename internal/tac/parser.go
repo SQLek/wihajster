@@ -7,19 +7,6 @@ import (
 	"strings"
 )
 
-var coreOpcodes = map[string]struct{}{
-	"const.i32": {}, "const.i8": {}, "copy": {},
-	"add": {}, "sub": {}, "mul": {}, "div_s": {}, "mod_s": {},
-	"and": {}, "or": {}, "xor": {}, "shl": {}, "shr_s": {},
-	"eq": {}, "ne": {}, "lt_s": {}, "le_s": {}, "gt_s": {}, "ge_s": {},
-	"neg": {}, "not": {}, "logic_not": {}, "call": {}, "alloca": {}, "load": {}, "store": {},
-}
-
-var optionalOpcodes = map[string]struct{}{
-	"gep":  {},
-	"zext": {}, "sext": {}, "trunc": {}, "bitcast": {}, "phi": {},
-}
-
 func ParseModule(r io.Reader) (Module, error) {
 	p := parser{reader: bufio.NewReader(r)}
 	return p.parse()
@@ -108,6 +95,9 @@ func (p *parser) parseFunction(header string) (Function, error) {
 		if err != nil {
 			return Function{}, p.errf("%v", err)
 		}
+		if err := VerifyInstruction(inst); err != nil {
+			return Function{}, p.errf("%v", err)
+		}
 
 		if inst.Kind == InstructionLabel {
 			if _, exists := definedLabels[inst.Label]; exists {
@@ -115,18 +105,18 @@ func (p *parser) parseFunction(header string) (Function, error) {
 			}
 			definedLabels[inst.Label] = struct{}{}
 		}
-		if inst.Destination != "" {
-			if _, exists := definedDestinations[inst.Destination]; exists {
-				return Function{}, p.errf("destination %q redefined", inst.Destination)
+		if inst.HasDestination {
+			if _, exists := definedDestinations[inst.Destination.Text]; exists {
+				return Function{}, p.errf("destination %q redefined", inst.Destination.Text)
 			}
-			definedDestinations[inst.Destination] = struct{}{}
+			definedDestinations[inst.Destination.Text] = struct{}{}
 		}
 		switch inst.Kind {
 		case InstructionJmp:
-			usedLabels[inst.Label] = struct{}{}
+			usedLabels[inst.TrueLabel.Text] = struct{}{}
 		case InstructionBr:
-			usedLabels[inst.TrueLabel] = struct{}{}
-			usedLabels[inst.FalseLabel] = struct{}{}
+			usedLabels[inst.TrueLabel.Text] = struct{}{}
+			usedLabels[inst.FalseLabel.Text] = struct{}{}
 		}
 
 		fn.Instructions = append(fn.Instructions, inst)
@@ -141,7 +131,7 @@ func (p *parser) parseFunction(header string) (Function, error) {
 	return fn, nil
 }
 
-func (p *parser) nextLogicalLine() (string, error) {
+func (p *parser) nextLogicalLine() (string, error) { /* unchanged */
 	for {
 		line, err := p.reader.ReadString('\n')
 		if err != nil && err != io.EOF {
@@ -150,7 +140,6 @@ func (p *parser) nextLogicalLine() (string, error) {
 		if err == io.EOF && len(line) == 0 {
 			return "", io.EOF
 		}
-
 		p.line++
 		line = strings.TrimRight(line, "\r\n")
 		line = stripComment(line)
@@ -169,38 +158,31 @@ func parseFunctionHeader(line string) (Function, error) {
 	if !strings.HasPrefix(line, "func ") || !strings.HasSuffix(line, "{") {
 		return Function{}, fmt.Errorf("invalid function header: %q", line)
 	}
-
 	withoutBrace := strings.TrimSpace(strings.TrimSuffix(line, "{"))
 	signature := strings.TrimSpace(strings.TrimPrefix(withoutBrace, "func "))
-
 	arrowIdx := strings.Index(signature, "->")
 	if arrowIdx < 0 {
 		return Function{}, fmt.Errorf("function header missing return type")
 	}
-
 	left := strings.TrimSpace(signature[:arrowIdx])
 	retType := strings.TrimSpace(signature[arrowIdx+2:])
 	if retType == "" {
 		return Function{}, fmt.Errorf("function return type is empty")
 	}
-
 	openIdx := strings.Index(left, "(")
 	closeIdx := strings.LastIndex(left, ")")
 	if openIdx <= 0 || closeIdx < openIdx {
 		return Function{}, fmt.Errorf("function parameter list is malformed")
 	}
-
 	name := strings.TrimSpace(left[:openIdx])
 	if !strings.HasPrefix(name, "@") {
 		return Function{}, fmt.Errorf("function name must start with '@': %q", name)
 	}
-
 	paramsRaw := strings.TrimSpace(left[openIdx+1 : closeIdx])
 	params, err := parseParams(paramsRaw)
 	if err != nil {
 		return Function{}, err
 	}
-
 	return Function{Name: name, Parameters: params, ReturnType: retType}, nil
 }
 
@@ -208,7 +190,6 @@ func parseParams(raw string) ([]Parameter, error) {
 	if raw == "" {
 		return nil, nil
 	}
-
 	parts := strings.Split(raw, ",")
 	params := make([]Parameter, 0, len(parts))
 	for _, part := range parts {
@@ -238,15 +219,13 @@ func parseInstruction(line string) (Instruction, error) {
 		}
 		return Instruction{Kind: InstructionLabel, Label: label}, nil
 	}
-
 	if strings.HasPrefix(line, "jmp ") {
 		label := strings.TrimSpace(strings.TrimPrefix(line, "jmp "))
 		if !strings.HasPrefix(label, ".L") {
 			return Instruction{}, fmt.Errorf("jmp target must be a label: %q", label)
 		}
-		return Instruction{Kind: InstructionJmp, Label: label}, nil
+		return Instruction{Kind: InstructionJmp, TrueLabel: Label(label)}, nil
 	}
-
 	if strings.HasPrefix(line, "br ") {
 		rest := strings.TrimSpace(strings.TrimPrefix(line, "br "))
 		parts := splitCommaSeparated(rest)
@@ -256,17 +235,24 @@ func parseInstruction(line string) (Instruction, error) {
 		if !strings.HasPrefix(parts[1], ".L") || !strings.HasPrefix(parts[2], ".L") {
 			return Instruction{}, fmt.Errorf("br targets must be labels")
 		}
-		return Instruction{
-			Kind:       InstructionBr,
-			Condition:  parts[0],
-			TrueLabel:  parts[1],
-			FalseLabel: parts[2],
-		}, nil
+		cond, err := parseValueOperand(parts[0])
+		if err != nil {
+			return Instruction{}, err
+		}
+		return Instruction{Kind: InstructionBr, Condition: cond, TrueLabel: Label(parts[1]), FalseLabel: Label(parts[2])}, nil
 	}
-
 	if line == "ret" || strings.HasPrefix(line, "ret ") {
 		value := strings.TrimSpace(strings.TrimPrefix(line, "ret"))
-		return Instruction{Kind: InstructionRet, ReturnValue: value}, nil
+		inst := Instruction{Kind: InstructionRet}
+		if value != "" {
+			op, err := parseValueOperand(value)
+			if err != nil {
+				return Instruction{}, err
+			}
+			inst.HasReturnValue = true
+			inst.ReturnValue = op
+		}
+		return inst, nil
 	}
 
 	inst := Instruction{Kind: InstructionOp}
@@ -277,30 +263,116 @@ func parseInstruction(line string) (Instruction, error) {
 		if !strings.HasPrefix(left, "%") {
 			return Instruction{}, fmt.Errorf("destination must start with '%%': %q", left)
 		}
-		inst.Destination = left
+		inst.HasDestination = true
+		inst.Destination = classifyPercentOperand(left)
 	}
-
 	tokens := strings.Fields(right)
 	if len(tokens) == 0 {
 		return Instruction{}, fmt.Errorf("empty instruction")
 	}
-	inst.Opcode = tokens[0]
-	if _, ok := coreOpcodes[inst.Opcode]; !ok {
-		if _, optional := optionalOpcodes[inst.Opcode]; optional {
-			return Instruction{}, fmt.Errorf("opcode %q is recognized but not enabled in milestone M1", inst.Opcode)
+	opcode, ok, optional := ParseOpcode(tokens[0])
+	if !ok {
+		if optional {
+			return Instruction{}, fmt.Errorf("opcode %q is recognized but not enabled in milestone M1", tokens[0])
 		}
-		return Instruction{}, fmt.Errorf("unknown opcode %q", inst.Opcode)
+		return Instruction{}, fmt.Errorf("unknown opcode %q", tokens[0])
 	}
+	inst.Opcode = opcode
 
-	rest := strings.TrimSpace(strings.TrimPrefix(right, inst.Opcode))
+	rest := strings.TrimSpace(strings.TrimPrefix(right, tokens[0]))
 	if rest != "" {
-		if inst.Opcode == "call" {
-			inst.Operands = []string{rest}
-		} else {
-			inst.Operands = splitCommaSeparated(rest)
+		ops, err := parseOpcodeOperands(opcode, rest)
+		if err != nil {
+			return Instruction{}, err
 		}
+		inst.Operands = ops
 	}
 	return inst, nil
+}
+
+func parseOpcodeOperands(opcode Opcode, raw string) ([]Operand, error) {
+	if opcode == OpcodeCall {
+		callee, args, err := parseCallText(raw)
+		if err != nil {
+			return nil, err
+		}
+		out := []Operand{FunctionSymbol(callee)}
+		for _, arg := range args {
+			a, err := parseValueOperand(arg)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, a)
+		}
+		return out, nil
+	}
+	parts := splitCommaSeparated(raw)
+	out := make([]Operand, 0, len(parts))
+	for _, p := range parts {
+		if opcode == OpcodeLoad || opcode == OpcodeStore {
+			if len(out) == 0 {
+				if !strings.HasPrefix(p, "%") {
+					return nil, fmt.Errorf("stack slot pointer must start with '%%': %q", p)
+				}
+				out = append(out, StackSlotPointer(p))
+				continue
+			}
+		}
+		if opcode == OpcodeAlloca {
+			out = append(out, Immediate(p))
+			continue
+		}
+		op, err := parseValueOperand(p)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, op)
+	}
+	return out, nil
+}
+
+func parseCallText(raw string) (string, []string, error) {
+	raw = strings.TrimSpace(raw)
+	open := strings.Index(raw, "(")
+	close := strings.LastIndex(raw, ")")
+	if open <= 0 || close < open {
+		return "", nil, fmt.Errorf("malformed call operand %q", raw)
+	}
+	callee := strings.TrimSpace(raw[:open])
+	if !strings.HasPrefix(callee, "@") {
+		return "", nil, fmt.Errorf("malformed call callee %q", callee)
+	}
+	argsRaw := strings.TrimSpace(raw[open+1 : close])
+	if argsRaw == "" {
+		return callee, nil, nil
+	}
+	return callee, splitCommaSeparated(argsRaw), nil
+}
+
+func parseValueOperand(raw string) (Operand, error) {
+	raw = strings.TrimSpace(raw)
+	switch {
+	case raw == "":
+		return Operand{}, fmt.Errorf("empty operand")
+	case strings.HasPrefix(raw, "%"):
+		return classifyPercentOperand(raw), nil
+	case strings.HasPrefix(raw, "@"):
+		return FunctionSymbol(raw), nil
+	case strings.HasPrefix(raw, ".L"):
+		return Label(raw), nil
+	default:
+		return Immediate(raw), nil
+	}
+}
+
+func classifyPercentOperand(raw string) Operand {
+	if strings.HasPrefix(raw, "%t") {
+		return Temp(raw)
+	}
+	if strings.HasPrefix(raw, "%s") {
+		return StackSlotPointer(raw)
+	}
+	return Param(raw)
 }
 
 func splitCommaSeparated(raw string) []string {

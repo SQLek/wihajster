@@ -1,55 +1,57 @@
 package tac
 
-import (
-	"fmt"
-	"strings"
-)
+import "fmt"
 
 // NewTemp allocates a new deterministic temporary name for the function.
 // Names are monotonically increasing: %t0, %t1, ...
-func (f *Function) NewTemp() string {
-	temp := fmt.Sprintf("%%t%d", f.nextTempID)
+func (f *Function) NewTemp() Operand {
+	temp := Temp(fmt.Sprintf("%%t%d", f.nextTempID))
 	f.nextTempID++
 	return temp
 }
 
+func (f *Function) NewStackSlot() Operand {
+	slot := StackSlotPointer(fmt.Sprintf("%%s%d", f.nextTempID))
+	f.nextTempID++
+	return slot
+}
+
 // AddInstruction appends a value-producing operation instruction and returns
 // the generated destination temporary.
-func (f *Function) AddInstruction(opcode string, operands ...string) string {
-	temp := f.NewTemp()
+func (f *Function) AddInstruction(opcode Opcode, operands ...Operand) Operand {
+	dst := f.NewTemp()
+	if opcode == OpcodeAlloca {
+		dst = f.NewStackSlot()
+	}
 	f.Instructions = append(f.Instructions, Instruction{
-		Kind:        InstructionOp,
-		Destination: temp,
-		Opcode:      opcode,
-		Operands:    append([]string(nil), operands...),
+		Kind:           InstructionOp,
+		HasDestination: true,
+		Destination:    dst,
+		Opcode:         opcode,
+		Operands:       append([]Operand(nil), operands...),
 	})
-	return temp
+	return dst
 }
 
 // AddVoidInstruction appends a side-effect operation with no destination.
-func (f *Function) AddVoidInstruction(opcode string, operands ...string) {
+func (f *Function) AddVoidInstruction(opcode Opcode, operands ...Operand) {
 	f.Instructions = append(f.Instructions, Instruction{
 		Kind:     InstructionOp,
 		Opcode:   opcode,
-		Operands: append([]string(nil), operands...),
+		Operands: append([]Operand(nil), operands...),
 	})
 }
 
 // AddCall emits a value-producing function call.
-func (f *Function) AddCall(callee string, args ...string) string {
-	return f.AddInstruction("call", formatCallOperand(callee, args))
+func (f *Function) AddCall(callee Operand, args ...Operand) Operand {
+	ops := append([]Operand{callee}, args...)
+	return f.AddInstruction(OpcodeCall, ops...)
 }
 
 // AddCallVoid emits a call with ignored return value.
-func (f *Function) AddCallVoid(callee string, args ...string) {
-	f.AddVoidInstruction("call", formatCallOperand(callee, args))
-}
-
-func formatCallOperand(callee string, args []string) string {
-	if len(args) == 0 {
-		return callee + "()"
-	}
-	return callee + "(" + strings.Join(args, ", ") + ")"
+func (f *Function) AddCallVoid(callee Operand, args ...Operand) {
+	ops := append([]Operand{callee}, args...)
+	f.AddVoidInstruction(OpcodeCall, ops...)
 }
 
 // AddLabel appends a label instruction.
@@ -59,20 +61,25 @@ func (f *Function) AddLabel(label string) {
 
 // AddJmp appends an unconditional jump instruction.
 func (f *Function) AddJmp(label string) {
-	f.Instructions = append(f.Instructions, Instruction{Kind: InstructionJmp, Label: label})
+	f.Instructions = append(f.Instructions, Instruction{Kind: InstructionJmp, TrueLabel: Label(label)})
 }
 
 // AddBr appends a conditional branch instruction.
-func (f *Function) AddBr(condition, trueLabel, falseLabel string) {
+func (f *Function) AddBr(condition Operand, trueLabel, falseLabel string) {
 	f.Instructions = append(f.Instructions, Instruction{
 		Kind:       InstructionBr,
 		Condition:  condition,
-		TrueLabel:  trueLabel,
-		FalseLabel: falseLabel,
+		TrueLabel:  Label(trueLabel),
+		FalseLabel: Label(falseLabel),
 	})
 }
 
 // AddRet appends a return instruction. Empty value means bare `ret`.
-func (f *Function) AddRet(value string) {
-	f.Instructions = append(f.Instructions, Instruction{Kind: InstructionRet, ReturnValue: value})
+func (f *Function) AddRet(value Operand) {
+	inst := Instruction{Kind: InstructionRet}
+	if value.Kind != OperandInvalid {
+		inst.HasReturnValue = true
+		inst.ReturnValue = value
+	}
+	f.Instructions = append(f.Instructions, inst)
 }

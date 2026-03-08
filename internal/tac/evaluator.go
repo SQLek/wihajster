@@ -125,19 +125,19 @@ func (s *evalState) evalCall(functionName string, args []runtimeValue, depth int
 		case InstructionLabel:
 			pc++
 		case InstructionJmp:
-			next, ok := frame.labels[inst.Label]
+			next, ok := frame.labels[inst.TrueLabel.Text]
 			if !ok {
-				return runtimeValue{}, fmt.Errorf("invalid jump label %s in %s", inst.Label, functionName)
+				return runtimeValue{}, fmt.Errorf("invalid jump label %s in %s", inst.TrueLabel.Text, functionName)
 			}
 			pc = next
 		case InstructionBr:
-			cond, err := frame.resolveI32(inst.Condition)
+			cond, err := frame.resolveI32(inst.Condition.Text)
 			if err != nil {
 				return runtimeValue{}, err
 			}
-			target := inst.FalseLabel
+			target := inst.FalseLabel.Text
 			if cond != 0 {
-				target = inst.TrueLabel
+				target = inst.TrueLabel.Text
 			}
 			next, ok := frame.labels[target]
 			if !ok {
@@ -145,10 +145,10 @@ func (s *evalState) evalCall(functionName string, args []runtimeValue, depth int
 			}
 			pc = next
 		case InstructionRet:
-			if inst.ReturnValue == "" {
+			if !inst.HasReturnValue {
 				return runtimeValue{kind: valueI32, i32: 0}, nil
 			}
-			v, err := frame.resolveValue(inst.ReturnValue)
+			v, err := frame.resolveValue(inst.ReturnValue.Text)
 			if err != nil {
 				return runtimeValue{}, err
 			}
@@ -159,10 +159,10 @@ func (s *evalState) evalCall(functionName string, args []runtimeValue, depth int
 				return runtimeValue{}, err
 			}
 			if hasResult {
-				if inst.Destination == "" {
+				if !inst.HasDestination {
 					return runtimeValue{}, fmt.Errorf("opcode %s produced value without destination in %s", inst.Opcode, functionName)
 				}
-				frame.values[inst.Destination] = res
+				frame.values[inst.Destination.Text] = res
 			}
 			pc++
 		default:
@@ -185,34 +185,34 @@ func (s *evalState) evalOp(frame *evalFrame, inst Instruction, depth int) (runti
 	}
 
 	switch op {
-	case "const.i32":
+	case OpcodeConstI32:
 		if err := needCount(1); err != nil {
-			return runtimeValue{}, false, err
+			return runtimeValue{}, false, fmt.Errorf("opcode call expects at least one operand")
 		}
-		n, err := strconv.ParseInt(strings.TrimSpace(ops[0]), 10, 32)
+		n, err := strconv.ParseInt(strings.TrimSpace(ops[0].Text), 10, 32)
 		if err != nil {
-			return runtimeValue{}, false, fmt.Errorf("invalid const.i32 operand %q", ops[0])
+			return runtimeValue{}, false, fmt.Errorf("invalid const.i32 operand %q", ops[0].Text)
 		}
 		return runtimeValue{kind: valueI32, i32: int32(n)}, true, nil
-	case "const.i8":
+	case OpcodeConstI8:
 		if err := needCount(1); err != nil {
 			return runtimeValue{}, false, err
 		}
-		n, err := strconv.ParseInt(strings.TrimSpace(ops[0]), 10, 8)
+		n, err := strconv.ParseInt(strings.TrimSpace(ops[0].Text), 10, 8)
 		if err != nil {
-			return runtimeValue{}, false, fmt.Errorf("invalid const.i8 operand %q", ops[0])
+			return runtimeValue{}, false, fmt.Errorf("invalid const.i8 operand %q", ops[0].Text)
 		}
 		return runtimeValue{kind: valueI32, i32: int32(int8(n))}, true, nil
-	case "copy":
+	case OpcodeCopy:
 		if err := needCount(1); err != nil {
 			return runtimeValue{}, false, err
 		}
-		v, err := frame.resolveValue(ops[0])
+		v, err := frame.resolveValue(ops[0].Text)
 		if err != nil {
 			return runtimeValue{}, false, err
 		}
 		return v, true, nil
-	case "alloca":
+	case OpcodeAlloca:
 		if err := needCount(1); err != nil {
 			return runtimeValue{}, false, err
 		}
@@ -220,11 +220,11 @@ func (s *evalState) evalOp(frame *evalFrame, inst Instruction, depth int) (runti
 		frame.nextAddr++
 		frame.memory[addr] = memoryCell{}
 		return runtimeValue{kind: valuePtr, ptr: addr}, true, nil
-	case "load":
+	case OpcodeLoad:
 		if err := needCount(1); err != nil {
 			return runtimeValue{}, false, err
 		}
-		ptr, err := frame.resolvePtr(ops[0])
+		ptr, err := frame.resolvePtr(ops[0].Text)
 		if err != nil {
 			return runtimeValue{}, false, err
 		}
@@ -233,31 +233,28 @@ func (s *evalState) evalOp(frame *evalFrame, inst Instruction, depth int) (runti
 			return runtimeValue{}, false, fmt.Errorf("load from uninitialized memory at %d", ptr)
 		}
 		return cell.value, true, nil
-	case "store":
+	case OpcodeStore:
 		if err := needCount(2); err != nil {
 			return runtimeValue{}, false, err
 		}
-		ptr, err := frame.resolvePtr(ops[0])
+		ptr, err := frame.resolvePtr(ops[0].Text)
 		if err != nil {
 			return runtimeValue{}, false, err
 		}
-		val, err := frame.resolveValue(ops[1])
+		val, err := frame.resolveValue(ops[1].Text)
 		if err != nil {
 			return runtimeValue{}, false, err
 		}
 		frame.memory[ptr] = memoryCell{value: val, initialized: true}
 		return runtimeValue{}, false, nil
-	case "call":
-		if err := needCount(1); err != nil {
-			return runtimeValue{}, false, err
+	case OpcodeCall:
+		if len(ops) == 0 {
+			return runtimeValue{}, false, fmt.Errorf("opcode call expects at least one operand")
 		}
-		callee, args, err := parseCallOperand(ops[0])
-		if err != nil {
-			return runtimeValue{}, false, err
-		}
-		argv := make([]runtimeValue, 0, len(args))
-		for _, a := range args {
-			v, err := frame.resolveValue(a)
+		callee := ops[0].Text
+		argv := make([]runtimeValue, 0, len(ops)-1)
+		for _, a := range ops[1:] {
+			v, err := frame.resolveValue(a.Text)
 			if err != nil {
 				return runtimeValue{}, false, err
 			}
@@ -267,22 +264,22 @@ func (s *evalState) evalOp(frame *evalFrame, inst Instruction, depth int) (runti
 		if err != nil {
 			return runtimeValue{}, false, err
 		}
-		if inst.Destination == "" {
+		if !inst.HasDestination {
 			return runtimeValue{}, false, nil
 		}
 		return ret, true, nil
-	case "neg", "not", "logic_not":
+	case OpcodeNeg, OpcodeNot, OpcodeLogicNot:
 		if err := needCount(1); err != nil {
 			return runtimeValue{}, false, err
 		}
-		a, err := frame.resolveI32(ops[0])
+		a, err := frame.resolveI32(ops[0].Text)
 		if err != nil {
 			return runtimeValue{}, false, err
 		}
 		switch op {
-		case "neg":
+		case OpcodeNeg:
 			return runtimeValue{kind: valueI32, i32: -a}, true, nil
-		case "not":
+		case OpcodeNot:
 			return runtimeValue{kind: valueI32, i32: ^a}, true, nil
 		default:
 			if a == 0 {
@@ -290,54 +287,54 @@ func (s *evalState) evalOp(frame *evalFrame, inst Instruction, depth int) (runti
 			}
 			return runtimeValue{kind: valueI32, i32: 0}, true, nil
 		}
-	case "add", "sub", "mul", "div_s", "mod_s", "and", "or", "xor", "shl", "shr_s", "eq", "ne", "lt_s", "le_s", "gt_s", "ge_s":
+	case OpcodeAdd, OpcodeSub, OpcodeMul, OpcodeDivS, OpcodeModS, OpcodeAnd, OpcodeOr, OpcodeXor, OpcodeShl, OpcodeShrS, OpcodeEq, OpcodeNe, OpcodeLtS, OpcodeLeS, OpcodeGtS, OpcodeGeS:
 		if err := needCount(2); err != nil {
 			return runtimeValue{}, false, err
 		}
-		a, err := frame.resolveI32(ops[0])
+		a, err := frame.resolveI32(ops[0].Text)
 		if err != nil {
 			return runtimeValue{}, false, err
 		}
-		b, err := frame.resolveI32(ops[1])
+		b, err := frame.resolveI32(ops[1].Text)
 		if err != nil {
 			return runtimeValue{}, false, err
 		}
 		switch op {
-		case "add":
+		case OpcodeAdd:
 			return runtimeValue{kind: valueI32, i32: a + b}, true, nil
-		case "sub":
+		case OpcodeSub:
 			return runtimeValue{kind: valueI32, i32: a - b}, true, nil
-		case "mul":
+		case OpcodeMul:
 			return runtimeValue{kind: valueI32, i32: a * b}, true, nil
-		case "div_s":
+		case OpcodeDivS:
 			if b == 0 {
 				return runtimeValue{}, false, fmt.Errorf("division by zero")
 			}
 			return runtimeValue{kind: valueI32, i32: a / b}, true, nil
-		case "mod_s":
+		case OpcodeModS:
 			if b == 0 {
 				return runtimeValue{}, false, fmt.Errorf("modulo by zero")
 			}
 			return runtimeValue{kind: valueI32, i32: a % b}, true, nil
-		case "and":
+		case OpcodeAnd:
 			return runtimeValue{kind: valueI32, i32: a & b}, true, nil
-		case "or":
+		case OpcodeOr:
 			return runtimeValue{kind: valueI32, i32: a | b}, true, nil
-		case "xor":
+		case OpcodeXor:
 			return runtimeValue{kind: valueI32, i32: a ^ b}, true, nil
-		case "shl":
+		case OpcodeShl:
 			return runtimeValue{kind: valueI32, i32: a << uint32(b)}, true, nil
-		case "shr_s":
+		case OpcodeShrS:
 			return runtimeValue{kind: valueI32, i32: a >> uint32(b)}, true, nil
-		case "eq":
+		case OpcodeEq:
 			return boolI32(a == b), true, nil
-		case "ne":
+		case OpcodeNe:
 			return boolI32(a != b), true, nil
-		case "lt_s":
+		case OpcodeLtS:
 			return boolI32(a < b), true, nil
-		case "le_s":
+		case OpcodeLeS:
 			return boolI32(a <= b), true, nil
-		case "gt_s":
+		case OpcodeGtS:
 			return boolI32(a > b), true, nil
 		default:
 			return boolI32(a >= b), true, nil
@@ -386,31 +383,4 @@ func (f *evalFrame) resolvePtr(token string) (int, error) {
 		return 0, fmt.Errorf("expected pointer value")
 	}
 	return v.ptr, nil
-}
-
-func parseCallOperand(raw string) (string, []string, error) {
-	raw = strings.TrimSpace(raw)
-	open := strings.Index(raw, "(")
-	close := strings.LastIndex(raw, ")")
-	if open <= 0 || close < open {
-		return "", nil, fmt.Errorf("malformed call operand %q", raw)
-	}
-	callee := strings.TrimSpace(raw[:open])
-	if !strings.HasPrefix(callee, "@") {
-		return "", nil, fmt.Errorf("malformed call callee %q", callee)
-	}
-	argsRaw := strings.TrimSpace(raw[open+1 : close])
-	if argsRaw == "" {
-		return callee, nil, nil
-	}
-	parts := strings.Split(argsRaw, ",")
-	args := make([]string, 0, len(parts))
-	for _, p := range parts {
-		arg := strings.TrimSpace(p)
-		if arg == "" {
-			return "", nil, fmt.Errorf("malformed call operand %q", raw)
-		}
-		args = append(args, arg)
-	}
-	return callee, args, nil
 }
