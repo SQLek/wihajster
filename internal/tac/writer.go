@@ -70,7 +70,11 @@ func formatInstruction(inst Instruction) (string, error) {
 	case InstructionOp:
 		line := inst.Opcode
 		if inst.Opcode == "call" {
-			line += " " + formatCallText(inst.CallCallee, inst.CallArgs)
+			if inst.CallCallee != "" || len(inst.CallArgs) > 0 {
+				line += " " + formatCallText(inst.CallCallee, inst.CallArgs)
+			} else if len(inst.Operands) == 1 {
+				line += " " + inst.Operands[0]
+			}
 		} else if len(inst.Operands) > 0 {
 			line += " " + strings.Join(inst.Operands, ", ")
 		}

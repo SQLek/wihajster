@@ -167,3 +167,23 @@ func TestWriteModule_PreservesCallTextSyntaxFromStructuredFields(t *testing.T) {
 		t.Fatalf("missing n-arg call text: %s", text)
 	}
 }
+
+func TestWriteModule_CallLegacyOperandFallback(t *testing.T) {
+	mod := Module{Functions: []Function{{
+		Name:       "@main",
+		ReturnType: "i32",
+		Instructions: []Instruction{
+			{Kind: InstructionLabel, Label: ".L0"},
+			{Kind: InstructionOp, Opcode: "call", Operands: []string{"@ping()"}},
+			{Kind: InstructionRet, ReturnValue: "0"},
+		},
+	}}}
+
+	var out strings.Builder
+	if err := WriteModule(&out, mod); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if !strings.Contains(out.String(), "call @ping()") {
+		t.Fatalf("missing fallback call text: %s", out.String())
+	}
+}

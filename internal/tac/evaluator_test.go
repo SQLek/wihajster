@@ -221,3 +221,35 @@ func @f() -> i32 {
 		})
 	}
 }
+
+func TestEvaluateFunction_CallLegacyOperandFallback(t *testing.T) {
+	mod := Module{Functions: []Function{
+		{
+			Name:       "@id",
+			Parameters: []Parameter{{Name: "%x", Type: "i32"}},
+			ReturnType: "i32",
+			Instructions: []Instruction{
+				{Kind: InstructionLabel, Label: ".L0"},
+				{Kind: InstructionRet, ReturnValue: "%x"},
+			},
+		},
+		{
+			Name:       "@main",
+			ReturnType: "i32",
+			Instructions: []Instruction{
+				{Kind: InstructionLabel, Label: ".L0"},
+				{Kind: InstructionOp, Destination: "%t0", Opcode: "const.i32", Operands: []string{"7"}},
+				{Kind: InstructionOp, Destination: "%t1", Opcode: "call", Operands: []string{"@id(%t0)"}},
+				{Kind: InstructionRet, ReturnValue: "%t1"},
+			},
+		},
+	}}
+
+	got, err := EvaluateFunction(mod, "@main", nil, EvalOptions{})
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	if got != 7 {
+		t.Fatalf("expected 7, got %d", got)
+	}
+}
