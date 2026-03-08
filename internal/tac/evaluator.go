@@ -248,22 +248,15 @@ func (s *evalState) evalOp(frame *evalFrame, inst Instruction, depth int) (runti
 		frame.memory[ptr] = memoryCell{value: val, initialized: true}
 		return runtimeValue{}, false, nil
 	case "call":
-		if err := needCount(1); err != nil {
-			return runtimeValue{}, false, err
-		}
-		callee, args, err := parseCallOperand(ops[0])
-		if err != nil {
-			return runtimeValue{}, false, err
-		}
-		argv := make([]runtimeValue, 0, len(args))
-		for _, a := range args {
-			v, err := frame.resolveValue(a)
+		argv := make([]runtimeValue, 0, len(inst.CallArgs))
+		for _, a := range inst.CallArgs {
+			v, err := frame.resolveValue(string(a))
 			if err != nil {
 				return runtimeValue{}, false, err
 			}
 			argv = append(argv, v)
 		}
-		ret, err := s.evalCall(callee, argv, depth+1)
+		ret, err := s.evalCall(inst.CallCallee, argv, depth+1)
 		if err != nil {
 			return runtimeValue{}, false, err
 		}
@@ -386,31 +379,4 @@ func (f *evalFrame) resolvePtr(token string) (int, error) {
 		return 0, fmt.Errorf("expected pointer value")
 	}
 	return v.ptr, nil
-}
-
-func parseCallOperand(raw string) (string, []string, error) {
-	raw = strings.TrimSpace(raw)
-	open := strings.Index(raw, "(")
-	close := strings.LastIndex(raw, ")")
-	if open <= 0 || close < open {
-		return "", nil, fmt.Errorf("malformed call operand %q", raw)
-	}
-	callee := strings.TrimSpace(raw[:open])
-	if !strings.HasPrefix(callee, "@") {
-		return "", nil, fmt.Errorf("malformed call callee %q", callee)
-	}
-	argsRaw := strings.TrimSpace(raw[open+1 : close])
-	if argsRaw == "" {
-		return callee, nil, nil
-	}
-	parts := strings.Split(argsRaw, ",")
-	args := make([]string, 0, len(parts))
-	for _, p := range parts {
-		arg := strings.TrimSpace(p)
-		if arg == "" {
-			return "", nil, fmt.Errorf("malformed call operand %q", raw)
-		}
-		args = append(args, arg)
-	}
-	return callee, args, nil
 }

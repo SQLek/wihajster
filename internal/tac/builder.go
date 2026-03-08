@@ -1,9 +1,6 @@
 package tac
 
-import (
-	"fmt"
-	"strings"
-)
+import "fmt"
 
 // NewTemp allocates a new deterministic temporary name for the function.
 // Names are monotonically increasing: %t0, %t1, ...
@@ -37,19 +34,33 @@ func (f *Function) AddVoidInstruction(opcode string, operands ...string) {
 
 // AddCall emits a value-producing function call.
 func (f *Function) AddCall(callee string, args ...string) string {
-	return f.AddInstruction("call", formatCallOperand(callee, args))
+	temp := f.NewTemp()
+	callArgs := make([]ValueRef, 0, len(args))
+	for _, arg := range args {
+		callArgs = append(callArgs, ValueRef(arg))
+	}
+	f.Instructions = append(f.Instructions, Instruction{
+		Kind:        InstructionOp,
+		Destination: temp,
+		Opcode:      "call",
+		CallCallee:  callee,
+		CallArgs:    callArgs,
+	})
+	return temp
 }
 
 // AddCallVoid emits a call with ignored return value.
 func (f *Function) AddCallVoid(callee string, args ...string) {
-	f.AddVoidInstruction("call", formatCallOperand(callee, args))
-}
-
-func formatCallOperand(callee string, args []string) string {
-	if len(args) == 0 {
-		return callee + "()"
+	callArgs := make([]ValueRef, 0, len(args))
+	for _, arg := range args {
+		callArgs = append(callArgs, ValueRef(arg))
 	}
-	return callee + "(" + strings.Join(args, ", ") + ")"
+	f.Instructions = append(f.Instructions, Instruction{
+		Kind:       InstructionOp,
+		Opcode:     "call",
+		CallCallee: callee,
+		CallArgs:   callArgs,
+	})
 }
 
 // AddLabel appends a label instruction.

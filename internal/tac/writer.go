@@ -69,7 +69,9 @@ func formatInstruction(inst Instruction) (string, error) {
 		return "ret " + inst.ReturnValue, nil
 	case InstructionOp:
 		line := inst.Opcode
-		if len(inst.Operands) > 0 {
+		if inst.Opcode == "call" {
+			line += " " + formatCallText(inst.CallCallee, inst.CallArgs)
+		} else if len(inst.Operands) > 0 {
 			line += " " + strings.Join(inst.Operands, ", ")
 		}
 		if inst.Destination != "" {

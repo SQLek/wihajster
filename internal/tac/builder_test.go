@@ -51,7 +51,7 @@ func TestFunction_AddInstruction_AppendsValueProducingOp(t *testing.T) {
 	}
 }
 
-func TestFunction_AddCall_FormatsOperandDeterministically(t *testing.T) {
+func TestFunction_AddCall_UsesStructuredFields(t *testing.T) {
 	fn := &Function{}
 	dst := fn.AddCall("@sum", "%a", "%b")
 	if dst != "%t0" {
@@ -64,8 +64,29 @@ func TestFunction_AddCall_FormatsOperandDeterministically(t *testing.T) {
 	if inst.Opcode != "call" {
 		t.Fatalf("expected call opcode, got %s", inst.Opcode)
 	}
-	if len(inst.Operands) != 1 || inst.Operands[0] != "@sum(%a, %b)" {
-		t.Fatalf("unexpected call operand: %#v", inst.Operands)
+	if inst.CallCallee != "@sum" {
+		t.Fatalf("unexpected callee: %q", inst.CallCallee)
+	}
+	if len(inst.CallArgs) != 2 || inst.CallArgs[0] != ValueRef("%a") || inst.CallArgs[1] != ValueRef("%b") {
+		t.Fatalf("unexpected call args: %#v", inst.CallArgs)
+	}
+	if len(inst.Operands) != 0 {
+		t.Fatalf("expected empty generic operands for call, got %#v", inst.Operands)
+	}
+}
+
+func TestFunction_AddCallVoid_UsesStructuredFields(t *testing.T) {
+	fn := &Function{}
+	fn.AddCallVoid("@puts")
+	if len(fn.Instructions) != 1 {
+		t.Fatalf("expected one instruction, got %d", len(fn.Instructions))
+	}
+	inst := fn.Instructions[0]
+	if inst.Destination != "" {
+		t.Fatalf("expected empty destination for void call, got %q", inst.Destination)
+	}
+	if inst.CallCallee != "@puts" || len(inst.CallArgs) != 0 {
+		t.Fatalf("unexpected void call shape: %+v", inst)
 	}
 }
 

@@ -38,9 +38,14 @@ type Instruction struct {
 	Opcode      string
 	Operands    []string
 
+	CallCallee string
+	CallArgs   []ValueRef
+
 	Condition  string
 	TrueLabel  string
 	FalseLabel string
 
 	ReturnValue string
 }
+
+type ValueRef string
