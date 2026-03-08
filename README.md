@@ -93,17 +93,28 @@ Both targets share core frontend + TAC; only target profile and runtime glue dif
 
 ### M1: Frontend + TAC foundation
 
+Status: Complete (March 8, 2026)
+
 - tokenizer and parser for v0 grammar
 - semantic analyzer for supported types and expressions
 - TAC data model and lowering for expressions/statements
 - parser + sema + TAC golden tests
 
+M1 delivered:
+
+- local declarations with scoped sema symbol tables and deterministic redeclaration diagnostics
+- function prototypes + definitions consistency checks
+- direct function call lowering with arity/type checks
+- character literal lowering (`char` values lowered to `i32` TAC constants)
+- deterministic TAC evaluator v1 with acceptance tests on `examples/fibonacci.c`
+- deterministic unsupported diagnostics for deferred features (including globals in M1)
+
 Exit criteria:
 
 - test suite covers accepted/rejected v0 snippets with deterministic diagnostics
+- TAC behavior validated by evaluator-based acceptance tests
 
 ### M2: RISC-V backend and execution path
-
 - map TAC to RV32 assembly
 - function call/stack discipline for supported subset
 - basic runtime entry assumptions for QEMU profile
@@ -131,4 +142,14 @@ Exit criteria:
 - Add tests before broadening grammar coverage
 - Minimize third-party dependencies
 - Prioritize correctness and readability over premature optimization
+
+
+## Attribution
+
+- Project lead and primary author: Piotr SQLek Skólski
+- Development support: OpenAI Codex (iterative design + implementation sessions)
+- Commit activity snapshot (git shortlog -sn --all on March 8, 2026):
+  - 32 commits by Piotr SQLek Skólski
+  - 11 commits by Piotr SQLek SKólski (likely author-name/casing variant)
+
 
