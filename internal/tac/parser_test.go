@@ -57,7 +57,7 @@ func TestParseModule_OptionalOpcodeRejectedInM1(t *testing.T) {
 
 func @mem_demo() -> i32 {
 .L0:
-  %t0 = alloca i32
+  %t0 = phi %a, %b
   ret %t0
 }
 `

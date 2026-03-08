@@ -38,12 +38,15 @@ func (p *Parser) ParseTranslationUnit() (*TranslationUnit, error) {
 			break
 		}
 
-		fn, decl, ok := p.parseExternalDeclaration()
+		fn, decl, proto, ok := p.parseExternalDeclaration()
 		if ok {
-			if fn != nil {
+			switch {
+			case fn != nil:
 				tu.Functions = append(tu.Functions, *fn)
-			} else {
+			case decl != nil:
 				tu.Declarations = append(tu.Declarations, *decl)
+			default:
+				tu.Prototypes = append(tu.Prototypes, *proto)
 			}
 			continue
 		}
@@ -60,35 +63,40 @@ func (p *Parser) ParseTranslationUnit() (*TranslationUnit, error) {
 	return tu, nil
 }
 
-func (p *Parser) parseExternalDeclaration() (*FunctionDefinition, *Declaration, bool) {
+func (p *Parser) parseExternalDeclaration() (*FunctionDefinition, *Declaration, *FunctionPrototype, bool) {
 	typeTok, typ, ok := p.parseTypeName()
 	if !ok {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 
 	nameTok, name, ptrDepth, ok := p.parseDeclarator("declaration name")
 	if !ok {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	typ.PointerDepth += ptrDepth
 
 	if p.accept(lexer.TokenLParen) {
 		params, ok := p.parseParameterList()
 		if !ok {
-			return nil, nil, false
+			return nil, nil, nil, false
 		}
 		if !p.expectToken(lexer.TokenRParen, "')'") {
-			return nil, nil, false
+			return nil, nil, nil, false
 		}
 
 		if p.accept(lexer.TokenSemicolon) {
-			p.addDiagnostic(unsupportedError(nameTok, "function declarations without body"))
-			return nil, nil, false
+			proto := FunctionPrototype{
+				Token:      typeTok,
+				ReturnType: typ,
+				Name:       name,
+				Parameters: params,
+			}
+			return nil, nil, &proto, true
 		}
 
 		body, ok := p.parseBlockStatement()
 		if !ok {
-			return nil, nil, false
+			return nil, nil, nil, false
 		}
 
 		fn := FunctionDefinition{
@@ -98,16 +106,15 @@ func (p *Parser) parseExternalDeclaration() (*FunctionDefinition, *Declaration, 
 			Parameters: params,
 			Body:       body,
 		}
-		return &fn, nil, true
+		return &fn, nil, nil, true
 	}
 
 	decl, ok := p.parseDeclarationTail(typeTok, typ, nameTok, name)
 	if !ok {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
-	return nil, &decl, true
+	return nil, &decl, nil, true
 }
-
 func (p *Parser) parseTypeName() (lexer.Token, TypeName, bool) {
 	tok := p.peekTok()
 

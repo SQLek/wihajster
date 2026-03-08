@@ -51,6 +51,24 @@ func TestFunction_AddInstruction_AppendsValueProducingOp(t *testing.T) {
 	}
 }
 
+func TestFunction_AddCall_FormatsOperandDeterministically(t *testing.T) {
+	fn := &Function{}
+	dst := fn.AddCall("@sum", "%a", "%b")
+	if dst != "%t0" {
+		t.Fatalf("expected destination %%t0, got %s", dst)
+	}
+	if len(fn.Instructions) != 1 {
+		t.Fatalf("expected one instruction, got %d", len(fn.Instructions))
+	}
+	inst := fn.Instructions[0]
+	if inst.Opcode != "call" {
+		t.Fatalf("expected call opcode, got %s", inst.Opcode)
+	}
+	if len(inst.Operands) != 1 || inst.Operands[0] != "@sum(%a, %b)" {
+		t.Fatalf("unexpected call operand: %#v", inst.Operands)
+	}
+}
+
 func TestFunction_Builder_WriteParseRoundTrip(t *testing.T) {
 	fn := Function{Name: "@main", ReturnType: "i32"}
 	fn.AddLabel(".L0")

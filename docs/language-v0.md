@@ -5,7 +5,7 @@ This document defines the explicit C subset accepted by v0. Anything outside thi
 | Supported | Rejected (must produce explicit parser/semantic errors) |
 |---|---|
 | **Types**: `int` (32-bit, `int32_t`-equivalent), `char`, and pointers to those (`int*`, `char*`, nested pointers). | `short`, `long`, `long long`, unsigned/signed variants beyond `char`/`int`, `_Bool`, `void` objects, `struct`, `union`, `enum`, floating-point types (`float`, `double`, `long double`), complex/imaginary types. |
-| **Declarations**: local/global scalar declarations for supported types. | Arrays (local/global), VLAs, aggregate/object initializers beyond scalar basics, designated initializers, bit-fields, storage-class/qualifier complexity not in v0. |
+| **Declarations**: local scalar declarations for supported types. | Global declarations, arrays (local/global), VLAs, aggregate/object initializers beyond scalar basics, designated initializers, bit-fields, storage-class/qualifier complexity not in v0. |
 | **Expressions**: integer/char literals, identifiers, unary `- ! ~ * &`, binary `+ - * / % << >> & | ^ && ||`, comparisons (`== != < <= > >=`), assignment (`=`). | Increment/decrement (`++ --`), comma operator, ternary `?:`, compound assignment (`+=` etc.), casts (unless explicitly added later), `sizeof`, member access (`.` `->`), subscripting `[]` (since arrays are unsupported). |
 | **Statements**: expression statements, block statements, `if/else`, `while`, `for`, `return`. | `switch/case/default`, `goto`/labels, `do/while`, `break`/`continue` (until explicitly specified), empty declaration+statement extensions not in grammar. |
 | **Functions**: function definitions and calls, non-variadic only; no function pointer support. | Variadic functions (`...`), function pointer declarators/types/calls, old-style K&R declarations, nested functions. |
@@ -25,3 +25,4 @@ For every rejected feature category above, implement an explicit diagnostic path
 
 - This is an explicit contract for Milestone M1 scope discipline.
 - New features must be added here before they are accepted by default.
+
