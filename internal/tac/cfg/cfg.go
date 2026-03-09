@@ -10,14 +10,37 @@ import (
 type Graph struct {
 	Function tac.Function
 	Blocks   []BasicBlock
+	labels   map[string]tac.BlockID
 }
 
 type BasicBlock struct {
-	ID           int
+	ID           tac.BlockID
+	Label        string
 	Start        int
 	Instructions []tac.Instruction
-	Predecessors []int
-	Successors   []int
+	Predecessors []tac.BlockID
+	Successors   []tac.BlockID
+}
+
+func (g *Graph) BlockByLabel(label string) (tac.BlockID, bool) {
+	id, ok := g.labels[label]
+	return id, ok
+}
+
+func (g *Graph) EnsureLabel(id tac.BlockID) string {
+	if int(id) < 0 || int(id) >= len(g.Blocks) {
+		return ""
+	}
+	if g.labels == nil {
+		g.labels = map[string]tac.BlockID{}
+	}
+	if g.Blocks[int(id)].Label != "" {
+		return g.Blocks[int(id)].Label
+	}
+	label := fmt.Sprintf(".B%d", id)
+	g.Blocks[int(id)].Label = label
+	g.labels[label] = id
+	return label
 }
 
 func Build(fn tac.Function) (Graph, error) {
@@ -25,7 +48,7 @@ func Build(fn tac.Function) (Graph, error) {
 		return Graph{}, err
 	}
 	if len(fn.Instructions) == 0 {
-		return Graph{Function: fn}, nil
+		return Graph{Function: fn, labels: map[string]tac.BlockID{}}, nil
 	}
 
 	labelDefs := map[string]int{}
@@ -75,22 +98,27 @@ func Build(fn tac.Function) (Graph, error) {
 	sort.Ints(order)
 
 	blocks := make([]BasicBlock, 0, len(order))
-	startToBlock := map[int]int{}
+	startToBlock := map[int]tac.BlockID{}
+	labels := map[string]tac.BlockID{}
 	for i, start := range order {
 		end := len(fn.Instructions)
 		if i+1 < len(order) {
 			end = order[i+1]
 		}
 		b := BasicBlock{
-			ID:           i,
+			ID:           tac.BlockID(i),
 			Start:        start,
 			Instructions: append([]tac.Instruction(nil), fn.Instructions[start:end]...),
 		}
 		if len(b.Instructions) == 0 {
 			return Graph{}, fmt.Errorf("function %s: empty basic block at instruction %d", fn.Name, start)
 		}
+		if b.Instructions[0].Kind == tac.InstructionLabel {
+			b.Label = b.Instructions[0].Label
+			labels[b.Label] = b.ID
+		}
 		blocks = append(blocks, b)
-		startToBlock[start] = i
+		startToBlock[start] = b.ID
 	}
 
 	for i := range blocks {
@@ -111,7 +139,7 @@ func Build(fn tac.Function) (Graph, error) {
 			// no successors
 		default:
 			if i+1 < len(blocks) {
-				blocks[i].Successors = append(blocks[i].Successors, i+1)
+				blocks[i].Successors = append(blocks[i].Successors, tac.BlockID(i+1))
 			}
 		}
 
@@ -125,9 +153,9 @@ func Build(fn tac.Function) (Graph, error) {
 
 	for i := range blocks {
 		for _, succ := range blocks[i].Successors {
-			blocks[succ].Predecessors = append(blocks[succ].Predecessors, i)
+			blocks[int(succ)].Predecessors = append(blocks[int(succ)].Predecessors, tac.BlockID(i))
 		}
 	}
 
-	return Graph{Function: fn, Blocks: blocks}, nil
+	return Graph{Function: fn, Blocks: blocks, labels: labels}, nil
 }

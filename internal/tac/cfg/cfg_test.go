@@ -37,20 +37,31 @@ func @main() -> i32 {
 		t.Fatalf("expected 5 blocks, got %d", len(g.Blocks))
 	}
 
-	if got, want := g.Blocks[0].Successors, []int{2, 3}; !reflect.DeepEqual(got, want) {
+	if got, want := g.Blocks[0].Successors, []tac.BlockID{2, 3}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("block 0 successors mismatch: got %v want %v", got, want)
 	}
 	if len(g.Blocks[1].Predecessors) != 0 {
 		t.Fatalf("block 1 predecessors mismatch: got %v want []", g.Blocks[1].Predecessors)
 	}
-	if got, want := g.Blocks[2].Successors, []int{4}; !reflect.DeepEqual(got, want) {
+	if got, want := g.Blocks[2].Successors, []tac.BlockID{4}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("block 2 successors mismatch: got %v want %v", got, want)
 	}
-	if got, want := g.Blocks[3].Successors, []int{4}; !reflect.DeepEqual(got, want) {
+	if got, want := g.Blocks[3].Successors, []tac.BlockID{4}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("block 3 successors mismatch: got %v want %v", got, want)
 	}
-	if got, want := g.Blocks[4].Predecessors, []int{2, 3}; !reflect.DeepEqual(got, want) {
+	if got, want := g.Blocks[4].Predecessors, []tac.BlockID{2, 3}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("block 4 predecessors mismatch: got %v want %v", got, want)
+	}
+
+	if id, ok := g.BlockByLabel(".Ltrue"); !ok || id != 2 {
+		t.Fatalf("expected .Ltrue to map to block 2, got %d, ok=%v", id, ok)
+	}
+	unlabeled := g.EnsureLabel(1)
+	if unlabeled == "" {
+		t.Fatalf("expected generated label for block 1")
+	}
+	if id, ok := g.BlockByLabel(unlabeled); !ok || id != 1 {
+		t.Fatalf("expected generated label %q to map to block 1, got %d, ok=%v", unlabeled, id, ok)
 	}
 }
 

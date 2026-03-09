@@ -2,11 +2,48 @@ package tac
 
 import "fmt"
 
+type BlockID int
+
 type irBlock struct {
+	id         BlockID
 	start      int
 	label      string
 	terminator InstructionKind
-	successors []string
+	successors []BlockID
+}
+
+type irBlockIndex struct {
+	blocks       []irBlock
+	labelToBlock map[string]BlockID
+}
+
+func newIRBlockIndex(blocks []irBlock) *irBlockIndex {
+	index := &irBlockIndex{blocks: blocks, labelToBlock: map[string]BlockID{}}
+	for _, b := range blocks {
+		if b.label == "" {
+			continue
+		}
+		index.labelToBlock[b.label] = b.id
+	}
+	return index
+}
+
+func (idx *irBlockIndex) BlockByLabel(label string) (BlockID, bool) {
+	id, ok := idx.labelToBlock[label]
+	return id, ok
+}
+
+func (idx *irBlockIndex) EnsureLabel(id BlockID) string {
+	if int(id) < 0 || int(id) >= len(idx.blocks) {
+		return ""
+	}
+	if idx.blocks[id].label != "" {
+		return idx.blocks[id].label
+	}
+	label := fmt.Sprintf(".B%d", id)
+	idx.blocks[id].label = label
+	idx.labelToBlock[label] = id
+	return label
 }
 
 func ValidateFunctionIR(fn Function) error {
@@ -41,8 +78,8 @@ func ValidateFunctionIR(fn Function) error {
 
 	for i, block := range blocks {
 		for _, succ := range block.successors {
-			if _, exists := labelDefs[succ]; !exists {
-				return fmt.Errorf("function %s: successor label %q is not defined", fn.Name, succ)
+			if int(succ) < 0 || int(succ) >= len(blocks) {
+				return fmt.Errorf("function %s: successor block %d is out of range", fn.Name, succ)
 			}
 		}
 		if block.terminator == InstructionOp || block.terminator == InstructionLabel {
@@ -117,6 +154,7 @@ func collectIRBlocks(fn Function, labelDefs map[string]int) ([]irBlock, error) {
 	}
 
 	blocks := make([]irBlock, 0, len(starts))
+	startToID := map[int]BlockID{}
 	for idx, start := range starts {
 		end := len(fn.Instructions)
 		if idx+1 < len(starts) {
@@ -133,21 +171,40 @@ func collectIRBlocks(fn Function, labelDefs map[string]int) ([]irBlock, error) {
 				return nil, fmt.Errorf("function %s: terminator must be last instruction in block starting at %d", fn.Name, start)
 			}
 		}
-		b := irBlock{start: start, terminator: last.Kind}
+		b := irBlock{id: BlockID(idx), start: start, terminator: last.Kind}
 		if insts[0].Kind == InstructionLabel {
 			b.label = insts[0].Label
 		}
+		startToID[start] = b.id
+		blocks = append(blocks, b)
+	}
+
+	lookup := newIRBlockIndex(blocks)
+	for i := range blocks {
+		end := len(fn.Instructions)
+		if i+1 < len(blocks) {
+			end = blocks[i+1].start
+		}
+		last := fn.Instructions[end-1]
 		switch last.Kind {
 		case InstructionJmp:
-			b.successors = []string{last.TrueLabel.Text}
+			targetStart := labelDefs[last.TrueLabel.Text]
+			blocks[i].successors = []BlockID{startToID[targetStart]}
 		case InstructionBr:
-			if last.TrueLabel.Text == last.FalseLabel.Text {
-				b.successors = []string{last.TrueLabel.Text}
+			trueTarget := startToID[labelDefs[last.TrueLabel.Text]]
+			falseTarget := startToID[labelDefs[last.FalseLabel.Text]]
+			if trueTarget == falseTarget {
+				blocks[i].successors = []BlockID{trueTarget}
 			} else {
-				b.successors = []string{last.TrueLabel.Text, last.FalseLabel.Text}
+				blocks[i].successors = []BlockID{trueTarget, falseTarget}
 			}
 		}
-		blocks = append(blocks, b)
+
+		if blocks[i].label != "" {
+			if _, ok := lookup.BlockByLabel(blocks[i].label); !ok {
+				return nil, fmt.Errorf("function %s: missing block mapping for label %q", fn.Name, blocks[i].label)
+			}
+		}
 	}
 
 	return blocks, nil
